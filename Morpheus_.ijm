@@ -6,12 +6,12 @@
 #@ File(label="Output directory", style="directory") output
 #@ String(label="File suffix", value=".tif") suffix
 #@ String(label="Nucleus file identifier", value="dapi") identifier
-#@ Integer(label="Anti-Spot Lower Bound (pixel^2)", value=200) lowBound
+#@ Integer(label="Anti-spot lower bound (pixel^2)", value=200) lowBound
 #@ String(label="Tolerance (sigma)", choices={"1","2","3","4","5","6"}, style="listBox", value="3") tol
-#@ Boolean(label="Orientation Analysis", value=false) orient
-#@ Boolean(label="Nucleus Analysis", value=false) nucleus
-#@ Boolean(label="Full Output", value=false) full
-#@ Boolean(label="Verbose Log", value=true) verbose
+#@ Boolean(label="Orientation analysis", value=false) orient
+#@ Boolean(label="Nucleus analysis", value=false) nucleus
+#@ Boolean(label="Full output", value=false) full
+#@ Boolean(label="Verbose log", value=true) verbose
 
 // Force case-insensitiveness
 suffix = toLowerCase(suffix);
@@ -54,6 +54,7 @@ setBatchMode(true);
 
 // Global variables
 var objCounter = 0; //Count all the objects detected
+var shortlist = newArray();
 
 // Learn the characteristic features of the single cell from the whole dataset
 run("Set Measurements...", "area shape redirect=None decimal=3");
@@ -107,9 +108,9 @@ if(verbose) {
  * in other words, if an object has a size > highBound can be legitimately suspected to be a complex of two cells
  */
 highBound = 2*(typicalArea + tol*AreaStd/sqrt(sampleNum));
-//if(0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum)) > lowBound) {
-//	lowBound = 0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum));
-//}
+if(0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum)) > lowBound) {
+	lowBound = 0.5*(typicalArea - tol*AreaStd/sqrt(sampleNum));
+}
 // Highest tolerance (6):	typicalMinC + 0*MinCStd AND typicalMaxC - 0*MaxCStd
 // Mid tolerance (3):		typicalMinC + 3*MinCStd AND typicalMaxC - 3*MaxCStd
 // Lowest tolerance (1):	typicalMinC + 5*MinCStd AND typicalMaxC - 5*MaxCStd
@@ -130,9 +131,13 @@ if(boundFlag) {
 
 // Blank images used as 2D arrays: use 32-bit images to have a floating point value for each pixel 
 // MegaMatrix1 to store Shape Descriptors
-run("Summarize"); // Display Results
+newImage("decoy", "8-bit black", 10, 10, 1); // Robustness with respect to possible empty images
 run("Set Measurements...", "area perimeter bounding fit shape feret's redirect=None decimal=3"); // Full set of Descriptors (the same both for soma and nucleus)
+run("Measure");
 headings = split(String.getResultsHeadings);
+selectWindow("decoy");
+close();
+
 newImage("MegaMatrix1", "32-bit white", 1, lengthOf(headings), 1);
 // MegaMatrix1_N to store Nucleus Shape Descriptors
 if(nucleus) {
@@ -148,8 +153,8 @@ if(orient) {
 }
 
 // Do the Analysis
-fileNumber = ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A function of mine - see below
-print("\nTotal sample files processed: ", fileNumber);
+ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A function of mine - see below
+print("\nTotal sample files processed: ", shortlist.length); // shortlist.length == sampleNum
 selectWindow("MegaMatrix1");
 print("Total cells identified: ", getWidth(), " out of ", objCounter, " detected objects");
 
@@ -226,39 +231,48 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			run("Analyze Particles...", "size=" + lowBound + "-Infinity pixel show=Nothing exclude clear include");
 			
 			objCounter = objCounter + nResults;
-			
-			// Array of sample areas
-			a = newArray();
-			for (j = 0; j < nResults; j++) {
-				a = Array.concat(a, getResult("Area", j));
+
+			if(nResults > 0) {
+				shortlist = Array.concat(shortlist, list[i]);
+				
+				// Array of sample areas
+				a = newArray();
+				for (j = 0; j < nResults; j++) {
+					a = Array.concat(a, getResult("Area", j));
+				}
+				//Array.print(a); // Just for testing purpose
+				
+				// Array of sample circularities
+				c = newArray();
+				for (j = 0; j < nResults; j++) {
+					c = Array.concat(c, getResult("Circ.", j));
+				}
+				//Array.print(c); // Just for testing purpose
+				
+				// Statistics of interest
+				meda = findMedian(a); // A function of mine - see below
+				Array.getStatistics(c, minc, maxc);
+				stat = newArray(meda, minc, maxc);
+				if(verbose) {
+					print("Sample_" + (population.length/3)+1 + " Statistics:");
+					print("   Sample Size = ", nResults);
+					print("   Median Area = ", stat[0], " pixel^2");
+					print("   Circularity Minimum = ", stat[1]);
+					print("   Circularity Maximum = ", stat[2]);
+				}
+
+				population = Array.concat(population, stat);
 			}
-			//Array.print(a); // Just for testing purpose
-			
-			// Array of sample circularities
-			c = newArray();
-			for (j = 0; j < nResults; j++) {
-				c = Array.concat(c, getResult("Circ.", j));
-			}
-			//Array.print(c); // Just for testing purpose
-			
-			// Statistics of interest
-			meda = findMedian(a); // A function of mine - see below
-			Array.getStatistics(c, minc, maxc);
-			stat = newArray(meda, minc, maxc);
-			if(verbose) {
-				print("Sample_" + (population.length/3)+1 + " Statistics:");
-				print("   Sample Size = ", nResults);
-				print("   Median Area = ", stat[0], " pixel^2");
-				print("   Circularity Minimum = ", stat[1]);
-				print("   Circularity Maximum = ", stat[2]);
+			else {
+				if(verbose) {
+					print("WARNING: there are no detectable objects in this image. It may be void.");
+				}
 			}
 			
 			selectWindow("duplicate.tif");
 			close();
 			selectWindow(list[i]);
 			close();
-			
-			population = Array.concat(population, stat);
 		}
 	}
 	
@@ -283,69 +297,63 @@ function findMedian(x) {
 // Do the Analysis
 function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, minCirc, maxCirc, radius, headings) {
 	
-	list = getFileList(input);
-	j = 0; // Count only the files with the correct suffix and identifier
-	
 	if(verbose) {
 		print("\n");
 	}
 	
-	for (i = 0; i < list.length; i++) {
-		if((endsWith(toLowerCase(list[i]), suffix) || endsWith(toLowerCase(list[i]), suffix2)) && indexOf(toLowerCase(list[i]), identifier) == -1) { // Avoid files with the "identifier" substring within their name
-			
-			open(input + File.separator + list[i]);
-			if(verbose) {
-				print("Processing: " + input + File.separator + list[i]);
-			}
-			
-			run("Duplicate...", "title=morfo.tif");
-			
-			if(orient) {
-				CytoskeletOrient(output, j, list[i]); // A function of mine - see below
-			}
-			
-			selectWindow("morfo.tif");
-			run("8-bit");
-			run("Auto Threshold", "method=Li BlackBackground=false");
-			run("Make Binary");
-			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
-			run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Outlines exclude clear include");
-			
-			saveAs("results", output + File.separator + "Cell" + File.separator + "Descriptors_" + j+1 + ".xls");
-			
-			selectWindow("MegaMatrix1");
-			
-			if(j == 0)
-				extendWidth = nResults;
-			else
-				extendWidth = getWidth() + nResults;
-			
-			run("Canvas Size...", "width=" + extendWidth + " height=" + lengthOf(headings) + " position=Center-Left zero");	
-			for (row = 0; row < nResults; row++) {
-				for (col = 0; col < lengthOf(headings); col++)
-					setPixel(row+getWidth()-nResults, col, getResult(headings[col], row));
-			}
-			
-			if(orient) {
-				CellOrient(output, j, radius, list[i]); // A function of mine - see below
-			}
-			
-			selectWindow("Drawing of morfo.tif");
-			saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + j+1 + "b - Outlines - " + list[i]);
-			close(); // Close Cell Outlines
-			
-			selectWindow("morfo.tif");
-			saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + j+1 + "a - Thresholded - " + list[i]);
-			close(); // Close Thresholded image
-			
-			selectWindow(list[i]);
-			close(); // Close original image
-			
-			j = j+1;
+	for (i = 0; i < shortlist.length; i++) {
+		
+		open(input + File.separator + shortlist[i]);
+		if(verbose) {
+			print("Processing: " + input + File.separator + shortlist[i]);
 		}
+		
+		run("Duplicate...", "title=morfo.tif");
+		
+		if(orient) {
+			CytoskeletOrient(output, i, shortlist[i]); // A function of mine - see below
+		}
+		
+		selectWindow("morfo.tif");
+		run("8-bit");
+		run("Auto Threshold", "method=Li BlackBackground=false");
+		run("Make Binary");
+		run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
+		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Outlines exclude clear include");
+		
+		saveAs("results", output + File.separator + "Cell" + File.separator + "Descriptors_" + i+1 + ".xls");
+		
+		selectWindow("MegaMatrix1");
+		
+		if(i == 0)
+			extendWidth = nResults;
+		else
+			extendWidth = getWidth() + nResults;
+		
+		run("Canvas Size...", "width=" + extendWidth + " height=" + lengthOf(headings) + " position=Center-Left zero");
+		for (row = 0; row < nResults; row++) {
+			for (col = 0; col < lengthOf(headings); col++)
+				setPixel(row+getWidth()-nResults, col, getResult(headings[col], row));
+		}
+		
+		if(orient) {
+			CellOrient(output, i, radius, shortlist[i]); // A function of mine - see below
+		}
+		
+		selectWindow("Drawing of morfo.tif");
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "b - Outlines - " + shortlist[i]);
+		close(); // Close Cell Outlines
+		
+		selectWindow("morfo.tif");
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "a - Thresholded - " + shortlist[i]);
+		close(); // Close Thresholded image
+		
+		selectWindow(shortlist[i]);
+		close(); // Close original image
+		
 	}
 	
-	return j;
+	//return something;
 }
 
 // Do Nucleus Analysis
