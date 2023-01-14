@@ -44,6 +44,7 @@ if(nucleus) {
 tol = parseInt(tol);
 
 // Starting Morpheus Macro
+print("\\Clear"); // Empty the Log
 print("\n");
 print(">------------------------<");
 print("  Starting Morpheus");
@@ -255,6 +256,10 @@ if(verbose) {
 
 setBatchMode(false); // Note: if orient==true "MasterMatrix_O" will not be closed because it is the active image
 
+selectWindow("Log");  // Select Log-window
+saveAs("text", output + File.separator + "Log.txt"); // Save session Log
+
+
 //---------------------------------------------------------------------------------------------------//
 // Function Definitions
 //---------------------------------------------------------------------------------------------------//
@@ -275,9 +280,15 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			if(verbose) {
 				print("Pre-Processing: " + input + File.separator + list[i]);
 			}
-			
+
+			// Segmentation
 			run("Duplicate...", "title=duplicate.tif");
+			run("Enhance Contrast", "saturated=0.35");
+			run("Apply LUT");
 			run("8-bit");
+			rollingRad = ((getWidth()+getHeight())/2)/6; // To use a rolling ball of such size that 3x3=9 of them would completely fill a square field
+			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
+			run("Smooth");
 			run("Auto Threshold", "method=Li BlackBackground=false");
 			run("Make Binary");
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
@@ -293,7 +304,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				for (j = 0; j < nResults; j++) {
 					a = Array.concat(a, getResult("Area", j));
 				}
-				Array.print(a); // Just for testing purpose
+				//Array.print(a); // Just for testing purpose
 				
 				// Array of sample circularities
 				c = newArray();
@@ -366,9 +377,15 @@ function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, h
 		if(orient) {
 			CytoskeletOrient(output, i, shortlist[i]); // A function of mine - see below
 		}
-		
+
+		// Segmentation
 		selectWindow("morfo.tif");
+		run("Enhance Contrast", "saturated=0.35");
+		run("Apply LUT");
 		run("8-bit");
+		rollingRad = ((getWidth()+getHeight())/2)/6;
+		run("Subtract Background...", "rolling=" + rollingRad + " sliding");
+		run("Smooth");
 		run("Auto Threshold", "method=Li BlackBackground=false");
 		run("Make Binary");
 		run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
@@ -430,9 +447,15 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 			if(verbose) {
 				print("Processing: " + input + File.separator + list[i]);
 			}
-			
+
+			// Segmentation
 			run("Duplicate...", "title=morfo.tif");
+			run("Enhance Contrast", "saturated=0.35");
+			run("Apply LUT");
 			run("8-bit");
+			rollingRad = ((getWidth()+getHeight())/2)/6;
+			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
+			run("Smooth");
 			run("Auto Threshold", "method=Li BlackBackground=false");
 			run("Make Binary");
 			run("Watershed");
@@ -480,9 +503,16 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 function CytoskeletOrient(output, serial, file) {
 	
 	selectWindow("morfo.tif");
+	
 	run("Duplicate...", "title=morfo_enhance.tif");
 	run("Enhance Contrast", "saturated=0.35"); // Auto Brightness/Contrast
 	run("Apply LUT");
+	run("8-bit");
+	rollingRad = ((getWidth()+getHeight())/2)/6;
+	run("Subtract Background...", "rolling=" + rollingRad + " sliding");
+	//run("Duplicate...", "title=morfo_forHSB.tif"); // To save details for HSB map
+	run("Smooth");
+	
 	run("OrientationJ Distribution", "log=0.0 tensor=1.0 gradient=0 min-coherency=0.0 min-energy=1.0 harris-index=on color-survey=on s-color-survey=on s-distribution=on hue=Orientation sat=Coherency bri=Original-Image");
 	
 	selectWindow("morfo_enhance.tif");
@@ -504,7 +534,7 @@ function CytoskeletOrient(output, serial, file) {
 	close(); // Close color survey
 	
 	selectWindow("S-Color-survey-1");
-	if(full) { // Useful for edge effect checking
+	if(full) { // Useful for high-energy noise artifacts and edge effects checking
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "e - S-Cytoskeleton - " + file);
 	}
 	close(); // Close Selection color survey
@@ -676,7 +706,7 @@ function PlotMM2(sampleNum) {
 		setPixel(sampleNum, row, maxMM);
 	}
 	run("Fire");
-	//run("Apply LUT"); // Choose whether to apply it or not
+	run("Apply LUT"); // Comment to choose whether to apply it or not
 	
 	newHeight = 4*getHeight(); // Magnification 4x
 	newWidth = 4*getWidth();
@@ -709,6 +739,7 @@ function PlotMM2(sampleNum) {
 	close();
 	selectWindow("MasterMatrix_O");
 	run("Select None");
+	saveAs("tiff", output + File.separator + "MasterMatrix_O.tif");
 
 	//return something;
 }
