@@ -1,5 +1,6 @@
 // MORPHEUS -- release 2018
 // ImageJ 1.x macro language version
+// for ImageJ 1.52a or higher
 
 // Universal I/O parameter notation
 #@ File(label="Input directory", style="directory") input
@@ -130,24 +131,30 @@ if(boundFlag) {
 }
 
 // Blank images used as 2D arrays: use 32-bit images to have a floating point value for each pixel 
-// MegaMatrix1 to store Shape Descriptors
+// MasterMatrix_M to store Cell Shape Descriptors
 newImage("decoy", "8-bit black", 10, 10, 1); // Robustness with respect to possible empty images
-run("Set Measurements...", "area perimeter bounding fit shape feret's redirect=None decimal=3"); // Full set of Descriptors (the same both for soma and nucleus)
+run("Set Measurements...", "area perimeter fit shape feret's redirect=None decimal=3"); // Full set of Descriptors (the same both for soma and nucleus)
 run("Measure");
-headings = split(String.getResultsHeadings);
+fullheadings = split(String.getResultsHeadings);
+headings = newArray();
+for (i = 0; i < lengthOf(fullheadings); i++) {
+	if (fullheadings[i] != "FeretX" && fullheadings[i] != "FeretY") { // Delete uninformative measurements
+		headings = Array.concat(headings,fullheadings[i]);
+	}
+}
 selectWindow("decoy");
 close();
 
-newImage("MegaMatrix1", "32-bit white", 1, lengthOf(headings), 1);
-// MegaMatrix1_N to store Nucleus Shape Descriptors
+newImage("MasterMatrix_M", "32-bit white", 1, lengthOf(headings), 1);
+// MasterMatrix_N to store Nucleus Shape Descriptors
 if(nucleus) {
-	newImage("MegaMatrix1_N", "32-bit white", 1, lengthOf(headings), 1);
+	newImage("MasterMatrix_N", "32-bit white", 1, lengthOf(headings), 1);
 }
-// MegaMatrix2 to store Shape and Cytoskeleton Orientations
+// MasterMatrix_O to store Cell and Cytoskeleton Orientations
 if(orient) {
-	newImage("MegaMatrix2", "32-bit white", 180, 2*sampleNum+3, 1);
-	selectWindow("MegaMatrix2");
-	for (row = 0; row < 180; row++) {
+	newImage("MasterMatrix_O", "32-bit white", 180, 2*sampleNum+3, 1); // +3 because of a degree column + 2 separation columns
+	selectWindow("MasterMatrix_O");
+	for (row = 0; row < 180; row++) { // Add degree column
 		setPixel(row,0,-90+row);
 	}
 }
@@ -155,40 +162,86 @@ if(orient) {
 // Do the Analysis
 ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A function of mine - see below
 print("\nTotal sample files processed: ", shortlist.length); // shortlist.length == sampleNum
-selectWindow("MegaMatrix1");
+selectWindow("MasterMatrix_M");
 print("Total cells identified: ", getWidth(), " out of ", objCounter, " detected objects");
 
-run("Rotate 90 Degrees Right"); // Transpose MegaMatrix1
+// Save MasterMatrix_M as output
+run("Rotate 90 Degrees Right"); // Transpose MasterMatrix_M
 run("Flip Horizontally");
-saveAs("text image", output + File.separator + "MegaMatrix1.txt"); // ...can't save in .xls directly
+saveAs("text image", output + File.separator + "MasterMatrix_M.txt"); // ...can't save in .xls directly
 close();
-flagNoUse = File.delete(output + File.separator + "MegaMatrix1.xls"); // Delete any files with the same name, produced by possible previous runs
-flag = File.rename(output + File.separator + "MegaMatrix1.txt", output + File.separator + "MegaMatrix1.xls"); // Returns "1" (true) if successful
+flagNoUse = File.delete(output + File.separator + "MasterMatrix_M.xls"); // Delete any files with the same name, produced by possible previous runs
+flag = File.rename(output + File.separator + "MasterMatrix_M.txt", output + File.separator + "MasterMatrix_M.xls"); // Change extension - Returns "1" (true) if successful
+open(output + File.separator + "MasterMatrix_M.xls");
+colname = split(Table.headings);
+for (i = 0; i < lengthOf(colname); i++) { // Re-add headings
+	Table.renameColumn(colname[i], headings[i]);
+}
+flagNoUse = File.delete(output + File.separator + "MasterMatrix_M.xls");
+saveAs("results", output + File.separator + "MasterMatrix_M.xls");
+if (isOpen("Results")) {
+	selectWindow("Results");
+    run("Close");
+}
 
+// (Eventually) Do the Nucleus Analysis
 if(nucleus) {
 	N_fileNumber = ScanForNucleus(input, output, suffix, suffix2, identifier, typicalArea/10, typicalArea, headings); // A function of mine - see below - WARNING!! C'è accordo sui bounds?
 	print("\nTotal \"", identifier, "\" file processed: ", N_fileNumber);
-	selectWindow("MegaMatrix1_N");
+	selectWindow("MasterMatrix_N");
 	if(N_fileNumber > 0) {
 		print("Total nuclei identified: ", getWidth());
 	}
-	
-	run("Rotate 90 Degrees Right"); // Transpose MegaMatrix1_N
+
+	// Save MasterMatrix_N as output
+	run("Rotate 90 Degrees Right"); // Transpose MasterMatrix_N
 	run("Flip Horizontally");
-	saveAs("text image", output + File.separator + "MegaMatrix1_N.txt"); // ...can't save in .xls directly
+	saveAs("text image", output + File.separator + "MasterMatrix_N.txt"); // ...can't save in .xls directly
 	close();
-	flagNoUse = File.delete(output + File.separator + "MegaMatrix1_N.xls"); // Delete any files with the same name, produced by possible previous runs
-	flag = flag * File.rename(output + File.separator + "MegaMatrix1_N.txt", output + File.separator + "MegaMatrix1_N.xls"); // Logic AND
+	flagNoUse = File.delete(output + File.separator + "MasterMatrix_N.xls"); // Delete any files with the same name, produced by possible previous runs
+	flag = flag * File.rename(output + File.separator + "MasterMatrix_N.txt", output + File.separator + "MasterMatrix_N.xls"); // Logic AND
+	open(output + File.separator + "MasterMatrix_N.xls");
+	colname = split(Table.headings);
+	for (i = 0; i < lengthOf(colname); i++) { // Re-add headings
+		Table.renameColumn(colname[i], headings[i]);
+	}
+	flagNoUse = File.delete(output + File.separator + "MasterMatrix_N.xls");
+	saveAs("results", output + File.separator + "MasterMatrix_N.xls");
+	if (isOpen("Results")) {
+	selectWindow("Results");
+    run("Close");
+	}
 }
 
+// Plot and Save MasterMatrix_O as output
 if(orient) {
-	selectWindow("MegaMatrix2");
-	run("Rotate 90 Degrees Right"); // Transpose MegaMatrix2
+	selectWindow("MasterMatrix_O");
+	run("Rotate 90 Degrees Right"); // Transpose MasterMatrix_O
 	run("Flip Horizontally");
 	run("Flip Vertically"); // To have positive degrees upward and negative degrees downward
-	saveAs("text image", output + File.separator + "MegaMatrix2.txt"); // ...can't save in .xls directly
-	flagNoUse = File.delete(output + File.separator + "MegaMatrix2.xls"); // Delete any files with the same name, produced by possible previous runs
-	flag = flag * File.rename(output + File.separator + "MegaMatrix2.txt", output + File.separator + "MegaMatrix2.xls"); // Logic AND
+	saveAs("text image", output + File.separator + "MasterMatrix_O.txt"); // ...can't save in .xls directly
+	flagNoUse = File.delete(output + File.separator + "MasterMatrix_O.xls"); // Delete any files with the same name, produced by possible previous runs
+	flag = flag * File.rename(output + File.separator + "MasterMatrix_O.txt", output + File.separator + "MasterMatrix_O.xls"); // Logic AND
+	open(output + File.separator + "MasterMatrix_O.xls");
+	colname = split(Table.headings); // Add headings
+	Table.renameColumn(colname[0], "Degree");
+	Table.renameColumn(colname[1], "cell->");
+	Table.renameColumn(colname[sampleNum+2], "cytoskeleton->");
+	for (i = 0; i < sampleNum; i++) {
+		Table.renameColumn(colname[i+2], "Cell_"+toString(i+1));
+		Table.renameColumn(colname[sampleNum+i+3], "Cyto_"+toString(i+1));
+	}
+	for (i = 0; i < 180; i++) { // Empty separation columns
+		Table.set("cell->", i, "");
+		Table.set("cytoskeleton->", i, "");
+	}	
+	Table.showRowNumbers(false);
+	flagNoUse = File.delete(output + File.separator + "MasterMatrix_O.xls");
+	saveAs("results", output + File.separator + "MasterMatrix_O.xls");
+	if (isOpen("Results")) {
+	selectWindow("Results");
+    run("Close");
+	}
 
 	PlotMM2(sampleNum); // A function of mine - see below	
 }
@@ -200,7 +253,7 @@ if(verbose) {
 		print("\nWARNING !!! Some error occurred while saving data...");
 }
 
-setBatchMode(false); // Note: if orient==true "MegaMatrix2" will not be closed because it is the active image
+setBatchMode(false); // Note: if orient==true "MasterMatrix_O" will not be closed because it is the active image
 
 //---------------------------------------------------------------------------------------------------//
 // Function Definitions
@@ -240,7 +293,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				for (j = 0; j < nResults; j++) {
 					a = Array.concat(a, getResult("Area", j));
 				}
-				//Array.print(a); // Just for testing purpose
+				Array.print(a); // Just for testing purpose
 				
 				// Array of sample circularities
 				c = newArray();
@@ -321,9 +374,13 @@ function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, h
 		run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
 		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Outlines exclude clear include");
 		
-		saveAs("results", output + File.separator + "Cell" + File.separator + "Descriptors_" + i+1 + ".xls");
+		if (nResults > 0) {
+			Table.deleteColumn("FeretX"); // Delete uninformative measurements
+			Table.deleteColumn("FeretY"); // Delete uninformative measurements
+			saveAs("results", output + File.separator + "Cell" + File.separator + "Descriptors_" + i+1 + ".xls");
+		}
 		
-		selectWindow("MegaMatrix1");
+		selectWindow("MasterMatrix_M");
 		
 		if(i == 0)
 			extendWidth = nResults;
@@ -341,12 +398,12 @@ function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, h
 		}
 		
 		selectWindow("Drawing of morfo.tif");
-		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "b - Outlines - " + shortlist[i]);
-		close(); // Close Cell Outlines
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "b - Detection - " + shortlist[i]);
+		close(); // Close Cell Detection (Outlines)
 		
 		selectWindow("morfo.tif");
-		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "a - Thresholded - " + shortlist[i]);
-		close(); // Close Thresholded image
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
+		close(); // Close Segmentation image
 		
 		selectWindow(shortlist[i]);
 		close(); // Close original image
@@ -381,10 +438,14 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 			run("Watershed");
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
 			run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel show=Outlines exclude clear include");
+
+			if (nResults > 0) {
+				Table.deleteColumn("FeretX"); // Delete uninformative measurements
+				Table.deleteColumn("FeretY"); // Delete uninformative measurements
+				saveAs("results", output + File.separator + "Nucleus" + File.separator + "N_Descriptors_" + j+1 + ".xls");
+			}
 			
-			saveAs("results", output + File.separator + "Nucleus" + File.separator + "N_Descriptors_" + j+1 + ".xls");
-			
-			selectWindow("MegaMatrix1_N");
+			selectWindow("MasterMatrix_N");
 			
 			if(j == 0)
 				extendWidth = nResults;
@@ -398,12 +459,12 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 			}
 			
 			selectWindow("Drawing of morfo.tif");
-			saveAs("tiff", output + File.separator + "Nucleus" + File.separator + "N_Img_" + j+1 + "b - Outlines - " + list[i]);
-			close(); // Close Nuclei Outlines
+			saveAs("tiff", output + File.separator + "Nucleus" + File.separator + "N_Img_" + j+1 + "b - Detection - " + list[i]);
+			close(); // Close Nuclei Detection (Outlines)
 			
 			selectWindow("morfo.tif");
-			saveAs("tiff", output + File.separator + "Nucleus" + File.separator + "N_Img_" + j+1 + "a - Thresholded - " + list[i]);
-			close(); // Close Thresholded image
+			saveAs("tiff", output + File.separator + "Nucleus" + File.separator + "N_Img_" + j+1 + "a - Segmentation - " + list[i]);
+			close(); // Close Segmentation image
 			
 			selectWindow(list[i]);
 			close(); // Close original image
@@ -432,7 +493,7 @@ function CytoskeletOrient(output, serial, file) {
 	//saveAs("results", output + File.separator + "Cell" + File.separator + "Cytoskeleton_" + serial+1 + ".xls"); // Decomment this line to save a single Excel file for every sample image
 	close(); // Close S-Distribution (histogram) window
 	
-	selectWindow("MegaMatrix2");
+	selectWindow("MasterMatrix_O");
 	sampleNum = (getHeight()-3)/2;
 	for (row = 0; row < nResults; row++) {
 		setPixel(row, sampleNum+3+serial, getResult("Y", row));
@@ -581,7 +642,7 @@ function CellOrient(output, serial, radius, file) {
 		close();
 	}
 	
-	selectWindow("MegaMatrix2");
+	selectWindow("MasterMatrix_O");
 	for (row = 0; row < 180; row++) {
 		setPixel(row, serial+2, mainhisto[row]);
 	}
@@ -589,10 +650,10 @@ function CellOrient(output, serial, radius, file) {
 	//return something;
 }
 
-// Plot MegaMatrix2
+// Plot MasterMatrix_O
 function PlotMM2(sampleNum) {
 	
-	selectWindow("MegaMatrix2");
+	selectWindow("MasterMatrix_O");
 	// LUTs can't be applied to 32-bit images -> Convert to 16-bit
 	run("Conversions...", "scale"); // Scale from min–max to 0–65535 when converting from 32–bit to 16–bit
 	getStatistics(areaM, meanM, minM, maxM);
@@ -639,14 +700,14 @@ function PlotMM2(sampleNum) {
 	}
 	run("Invert");
 	
-	makeRectangle(0, 0, 60, 720); // Crop "Degree" column
+	makeRectangle(0, 0, 60, 720);
 	run("Copy");
-	selectWindow("MegaMatrix2");
+	selectWindow("MasterMatrix_O");
 	makeRectangle(0, 0, 60, 720);
 	run("Paste");
 	selectWindow("VerticalAxis");
 	close();
-	selectWindow("MegaMatrix2");
+	selectWindow("MasterMatrix_O");
 	run("Select None");
 
 	//return something;
