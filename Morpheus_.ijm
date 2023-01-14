@@ -1,6 +1,5 @@
 // MORPHEUS -- release 2018
 // ImageJ 1.x macro language version
-// for ImageJ 1.52a or higher
 
 // Universal I/O parameter notation
 #@ File(label="Input directory", style="directory") input
@@ -13,6 +12,12 @@
 #@ Boolean(label="Nucleus analysis", value=false) nucleus
 #@ Boolean(label="Full output", value=false) full
 #@ Boolean(label="Verbose log", value=true) verbose
+
+// Preliminaries
+// Check ImageJ version: 1.52a or higher is required for Table Macro Functions
+requires("1.52a");
+// For Reproducibility (when adding noise)
+random("seed", 101);
 
 // Force case-insensitiveness
 suffix = toLowerCase(suffix);
@@ -45,7 +50,6 @@ tol = parseInt(tol);
 
 // Starting Morpheus Macro
 print("\\Clear"); // Empty the Log
-print("\n");
 print(">------------------------<");
 print("  Starting Morpheus");
 print(">------------------------<");
@@ -134,7 +138,7 @@ if(boundFlag) {
 // Blank images used as 2D arrays: use 32-bit images to have a floating point value for each pixel 
 // MasterMatrix_M to store Cell Shape Descriptors
 newImage("decoy", "8-bit black", 10, 10, 1); // Robustness with respect to possible empty images
-run("Set Measurements...", "area perimeter fit shape feret's redirect=None decimal=3"); // Full set of Descriptors (the same both for soma and nucleus)
+run("Set Measurements...", "area perimeter fit shape feret's redirect=None decimal=5"); // Full set of Descriptors (the same both for soma and nucleus)
 run("Measure");
 fullheadings = split(String.getResultsHeadings);
 headings = newArray();
@@ -273,6 +277,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 	population = newArray();
 	
 	for (i = 0; i < list.length; i++) {
+		
 		// Search for files with .suffix extension and avoid files with "identifier" substring within their name
 		if((endsWith(toLowerCase(list[i]), suffix) || endsWith(toLowerCase(list[i]), suffix2)) && indexOf(toLowerCase(list[i]), identifier) == -1) {
 			
@@ -280,9 +285,9 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			if(verbose) {
 				print("Pre-Processing: " + input + File.separator + list[i]);
 			}
-
+			
 			// Segmentation
-			run("Duplicate...", "title=duplicate.tif");
+			run("Duplicate...", "title=Segment");
 			run("Enhance Contrast", "saturated=0.35");
 			run("Apply LUT");
 			run("8-bit");
@@ -291,6 +296,8 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			run("Smooth");
 			run("Auto Threshold", "method=Li BlackBackground=false");
 			run("Make Binary");
+			
+			// Analyze Particles
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
 			run("Analyze Particles...", "size=" + lowBound + "-Infinity pixel show=Nothing exclude clear include");
 			
@@ -298,34 +305,33 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 
 			if(nResults > 0) {
 				shortlist = Array.concat(shortlist, list[i]);
+				sampleNum = population.length/3;
 				
-				// Array of sample areas
+				// Array of sample areas and sample circularities
 				a = newArray();
-				for (j = 0; j < nResults; j++) {
-					a = Array.concat(a, getResult("Area", j));
-				}
-				//Array.print(a); // Just for testing purpose
-				
-				// Array of sample circularities
 				c = newArray();
 				for (j = 0; j < nResults; j++) {
+					a = Array.concat(a, getResult("Area", j));
 					c = Array.concat(c, getResult("Circ.", j));
 				}
-				//Array.print(c); // Just for testing purpose
+				//Array.print(a); // Debug
+				//Array.print(c); // Debug
 				
 				// Statistics of interest
 				meda = findMedian(a); // A function of mine - see below
 				Array.getStatistics(c, minc, maxc);
 				stat = newArray(meda, minc, maxc);
 				if(verbose) {
-					print("Sample_" + (population.length/3)+1 + " Statistics:");
-					print("   Sample Size = ", nResults);
-					print("   Median Area = ", stat[0], " pixel^2");
-					print("   Circularity Minimum = ", stat[1]);
-					print("   Circularity Maximum = ", stat[2]);
+					print("    Sample_" + sampleNum+1 + " Statistics:");
+					print("        Sample Size = ", nResults);
+					print("        Median Area = ", d2s(stat[0],1), " pixel^2");
+					print("        Circularity Minimum = ", d2s(stat[1],4));
+					print("        Circularity Maximum = ", d2s(stat[2],4));
 				}
-
 				population = Array.concat(population, stat);
+				
+				saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + sampleNum+1 + "a - Segmentation - " + list[i]);
+				close(); // Close 'Segmentation' image
 			}
 			else {
 				if(verbose) {
@@ -333,10 +339,8 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				}
 			}
 			
-			selectWindow("duplicate.tif");
-			close();
 			selectWindow(list[i]);
-			close();
+			close(); // Close original image
 		}
 	}
 	
@@ -366,30 +370,17 @@ function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, h
 	}
 	
 	for (i = 0; i < shortlist.length; i++) {
-		
-		open(input + File.separator + shortlist[i]);
 		if(verbose) {
 			print("Processing: " + input + File.separator + shortlist[i]);
 		}
 		
-		run("Duplicate...", "title=morfo.tif");
+		open(output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
 		
-		if(orient) {
-			CytoskeletOrient(output, i, shortlist[i]); // A function of mine - see below
-		}
-
-		// Segmentation
-		selectWindow("morfo.tif");
-		run("Enhance Contrast", "saturated=0.35");
-		run("Apply LUT");
-		run("8-bit");
-		rollingRad = ((getWidth()+getHeight())/2)/6;
-		run("Subtract Background...", "rolling=" + rollingRad + " sliding");
-		run("Smooth");
-		run("Auto Threshold", "method=Li BlackBackground=false");
-		run("Make Binary");
+		// Selection of isolated cells
 		run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
 		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Outlines exclude clear include");
+		selectWindow("Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
+		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Masks exclude clear include");
 		
 		if (nResults > 0) {
 			Table.deleteColumn("FeretX"); // Delete uninformative measurements
@@ -410,21 +401,22 @@ function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, h
 				setPixel(row+getWidth()-nResults, col, getResult(headings[col], row));
 		}
 		
+		ncells = nResults;
 		if(orient) {
-			CellOrient(output, i, radius, shortlist[i]); // A function of mine - see below
+			CytoskeletOrient(output, i, shortlist[i], ncells); // A function of mine - see below
+			CellOrient(output, i, radius, shortlist[i], ncells); // A function of mine - see below
 		}
 		
-		selectWindow("Drawing of morfo.tif");
+		selectWindow("Drawing of Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "b - Detection - " + shortlist[i]);
 		close(); // Close Cell Detection (Outlines)
 		
-		selectWindow("morfo.tif");
-		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
-		close(); // Close Segmentation image
+		selectWindow("Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
+		close(); // Close 'Segmentation' image
 		
-		selectWindow(shortlist[i]);
-		close(); // Close original image
-		
+		selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
+		//saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "ab - Mask - " + shortlist[i]); // Debug
+		close(); // Close 'Mask' image
 	}
 	
 	//return something;
@@ -500,33 +492,46 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 }
 
 //Cytoskeleton Orientation
-function CytoskeletOrient(output, serial, file) {
+function CytoskeletOrient(output, serial, file, ncells) {
 	
-	selectWindow("morfo.tif");
+	open(input + File.separator + file);
 	
-	run("Duplicate...", "title=morfo_enhance.tif");
+	run("Duplicate...", "title=Original");
 	run("Enhance Contrast", "saturated=0.35"); // Auto Brightness/Contrast
 	run("Apply LUT");
 	run("8-bit");
-	rollingRad = ((getWidth()+getHeight())/2)/6;
-	run("Subtract Background...", "rolling=" + rollingRad + " sliding");
-	//run("Duplicate...", "title=morfo_forHSB.tif"); // To save details for HSB map
-	run("Smooth");
+	//run("Smooth");
+
+	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
+	run("Duplicate...", "title=MultiplMask");
+	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
+	imageCalculator("Multiply create", "Original", "MultiplMask");
 	
-	run("OrientationJ Distribution", "log=0.0 tensor=1.0 gradient=0 min-coherency=0.0 min-energy=1.0 harris-index=on color-survey=on s-color-survey=on s-distribution=on hue=Orientation sat=Coherency bri=Original-Image");
+	// gradient=4 -> Gaussian Gradient
+	run("OrientationJ Distribution", "log=0.0 tensor=1.0 gradient=4 min-coherency=1.0 min-energy=1.0 harris-index=on color-survey=on s-color-survey=on s-distribution=on hue=Orientation sat=Coherency bri=Original-Image");
 	
-	selectWindow("morfo_enhance.tif");
-	close(); // Close duplicate
+	selectWindow(file);
+	close(); // Close original
+	selectWindow("Original");
+	close(); // Close original duplicate
+	selectWindow("MultiplMask");
+	close(); // Multiplicative Mask
+	selectWindow("Result of Original");
+	close();
 	
 	selectWindow("S-Distribution-1");
 	Plot.showValues();
-	//saveAs("results", output + File.separator + "Cell" + File.separator + "Cytoskeleton_" + serial+1 + ".xls"); // Decomment this line to save a single Excel file for every sample image
 	close(); // Close S-Distribution (histogram) window
-	
+
+	// Normalization factor
+	norm = 0;
+	for (row = 0; row < nResults; row++) {
+		norm = norm + getResult("Y", row);
+	}
 	selectWindow("MasterMatrix_O");
 	sampleNum = (getHeight()-3)/2;
 	for (row = 0; row < nResults; row++) {
-		setPixel(row, sampleNum+3+serial, getResult("Y", row));
+		setPixel(row, sampleNum+3+serial, (getResult("Y", row)/norm)*ncells);
 	}
 	
 	selectWindow("Color-survey-1");
@@ -543,26 +548,27 @@ function CytoskeletOrient(output, serial, file) {
 }
 
 // Cell Orientation
-function CellOrient(output, serial, radius, file) {
+function CellOrient(output, serial, radius, file, ncells) {
 	
-	selectWindow("morfo.tif");
-	run("OrientationJ Distribution", "log=0.0 tensor=" + radius + " gradient=0 min-coherency=0.0 min-energy=0.0 harris-index=on color-survey=on hue=Orientation sat=Coherency bri=Original-Image");
+	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
+	// gradient=4 -> Gaussian Gradient
+	run("OrientationJ Distribution", "log=0.0 tensor=" + radius + " gradient=4 min-coherency=0.0 min-energy=0.0 harris-index=on color-survey=on hue=Orientation sat=Coherency bri=Original-Image");
 	
 	selectWindow("Color-survey-1");
-	setBatchMode("show"); // Safety option
-	run("Duplicate...", "tobesaved");
+	setBatchMode("show"); // Safety
+	run("Duplicate...", "title=ToSave");
 	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "c - Orientation - " + file);
 	close(); // Close saved tiff file
 	
 	selectWindow("Color-survey-1");
 	run("HSB Stack");
 	run("Duplicate...", "title=dup-bright duplicate range=3-3"); // Use Brightness-slice -> Original Binarized Image as Mask
-	run("8-bit"); // ...redundant
+	run("8-bit"); // Safety
 	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
 	
 	selectWindow("Color-survey-1");
 	run("Duplicate...", "title=dup-coher duplicate range=2-2"); // Use Saturation-slice -> Coherency
-	run("8-bit"); // ...redundant
+	run("8-bit"); // Safety
 	imageCalculator("Multiply create", "dup-coher", "dup-bright"); // Mask Coherency to make weights for histogram
 	selectWindow("Result of dup-coher");
 	rename("weight");
@@ -574,7 +580,7 @@ function CellOrient(output, serial, radius, file) {
 	
 	selectWindow("Color-survey-1");
 	run("Duplicate...", "title=dup-orient duplicate range=1-1"); // Use Hue-slice -> Orientation
-	run("8-bit"); // ...redundant
+	run("8-bit"); // Safety
 	setMinAndMax(0, 361); // Remap 256 (8-bit) to 180 levels -> rebin histogram! 361 has been empirically tested (256:180=x:256 -> x=364)
 	run("Apply LUT");
 	run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
@@ -585,15 +591,15 @@ function CellOrient(output, serial, radius, file) {
 	selectWindow("weight");
 	getStatistics(areaW, meanW, minW, maxW);
 	step = floor(maxW/10); // Ten-level weights (10 instead of 256 to speed up the computation)
-	//print("Max of Coherency = " + maxW); // Just for testing purpose
-	//print("Ten-level step = " + step); // Just for testing purpose
+	//print("Max of Coherency = " + maxW); // Debug
+	//print("Ten-level step = " + step); // Debug
 	
 	mainhisto = newArray(180);
-
+	
 	if(step >= 1) { // ...that is (maxW < 10)
 		for(h=0; h < 10; h++) {
 			
-			// Just for testing purpose
+			// Debug
 			/* 
 			if(h+1 == 10)
 				print("level", h+1, ":", h*step+1, "-", maxW);
@@ -632,7 +638,7 @@ function CellOrient(output, serial, radius, file) {
 		}
 	}
 	else{
-		//print("unique level", ":", 1, "-", maxW); // Just for testing purpose
+		//print("unique level", ":", 1, "-", maxW); // Debug
 		
 		selectWindow("weight");
 		run("Duplicate...", "title=temp");		
@@ -671,10 +677,15 @@ function CellOrient(output, serial, radius, file) {
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Histo_" + serial+1);
 		close();
 	}
-	
+
+	// Normalization factor
+	norm = 0;
+	for (row = 0; row < 180; row++) {
+		norm = norm + mainhisto[row];
+	}
 	selectWindow("MasterMatrix_O");
 	for (row = 0; row < 180; row++) {
-		setPixel(row, serial+2, mainhisto[row]);
+		setPixel(row, serial+2, (mainhisto[row]/norm)*ncells);
 	}
 	
 	//return something;
