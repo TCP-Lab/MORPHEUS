@@ -1,6 +1,6 @@
 // MORPHEUS -- release 2019
 // ImageJ 1.x macro language version
-// OrientationJ 2.0.3 (15 June 2018) required
+// OrientationJ 2.0.2 (or above) required
 
 // Universal I/O parameter notation
 #@ File(label="Input directory", style="directory") input
@@ -19,7 +19,7 @@
 //---------------------------------------------------------------------------------------------------//
  
 // Morpheus Version
-morphversion = "0.7/2019";
+morphversion = "0.8/2019";
 // Check ImageJ version: 1.52a or higher is required for Table Functions
 requires("1.52a");
 
@@ -30,9 +30,9 @@ random("seed", 101);
 systeminfo(morphversion); // A function of mine - see below
 
 // Batch Mode! ...to speed up the macro
-setBatchMode(true);
+//setBatchMode(true);
 
-// Scale from min–max to 0–255 when converting to 8–bit
+// Scale from min–max to 0–255 when converting to 8–bit (Default in Morpheus)
 run("Conversions...", "scale");
 
 // Force case-insensitiveness
@@ -72,9 +72,13 @@ for (i = 0; i < 180; i++) {
 	degreeAxis = Array.concat(degreeAxis, i-90);
 }
 
+//---------------------------------------------------------------------------------------------------//
+// Main
+//---------------------------------------------------------------------------------------------------//
+
 // Learn the characteristic features of the single cell from the whole dataset
 run("Set Measurements...", "area shape redirect=None decimal=3");
-// "pop" is an array featuring median areas and extreme circularities of each sample image alternately
+// "pop" is an array containing median areas and extreme circularities of each sample image alternately
 pop = GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound); // A function of mine - see below
 
 // Check for contents
@@ -273,6 +277,7 @@ setBatchMode(false); // Note: if orient==true "MasterMatrix_O" will not be close
 selectWindow("Log");  // Select Log-window
 saveAs("text", output + File.separator + "Log.txt"); // Save session Log
 
+selectWindow("MasterMatrix_O.tif");
 
 //---------------------------------------------------------------------------------------------------//
 // Function Definitions
@@ -557,23 +562,31 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
 	run("HSB Stack");
 	
+	run("Conversions...", " "); // Don't scale when converting to 8-bit
+	
 	selectWindow("OJ-Orientation-1");
+	run("Duplicate...", "title=dup-for-hue"); // Rescale [-90,+90] -> [0,255]
+		run("Add...", "value=90");
+		run("Divide...", "value=180");
+		run("Multiply...", "value=255");
+		run("8-bit");
 	run("Select All");
 	run("Copy");
 	selectWindow("ColorSurvey");
 	setSlice(1); // Hue
 	run("Paste");
-	selectWindow("OJ-Orientation-1");
-	run("Close"); // Don't know why, but OJ output images need to be closed by run("Close") when running in BatchMode. close() command is not effective...
 	
 	selectWindow("OJ-Coherency-1");
+	run("Duplicate...", "title=dup-for-sat"); // Rescale [0,1] -> [0,255]
+		run("Multiply...", "value=255");
+		run("8-bit");
 	run("Select All");
 	run("Copy");
 	selectWindow("ColorSurvey");
 	setSlice(2); // Saturation
 	run("Paste");
-	selectWindow("OJ-Coherency-1");
-	run("Close");
+	
+	run("Conversions...", "scale"); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit (Restore default)
 	
 	selectWindow("Result of Original");
 	run("Select All");
@@ -583,35 +596,15 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	run("Paste");
 	
 	run("RGB Color");
-
-	// Build the Masked Color Survey
-	newImage("MaskedColorSurvey", "RGB black", getWidth(), getHeight(), 1);
-	run("HSB Stack");
 	
-	selectWindow("OJ-Orientation Mask-1");
-	run("Select All");
-	run("Copy");
-	selectWindow("MaskedColorSurvey");
-	setSlice(1); // Hue
-	run("Paste");
-	selectWindow("OJ-Orientation Mask-1");
+	selectWindow("dup-for-hue");
+	close();
+	selectWindow("dup-for-sat");
+	close();
+	selectWindow("OJ-Orientation-1");
+	run("Close"); // Don't know why, but OJ output images need to be closed by run("Close") when running in BatchMode. close() command is not effective...
+	selectWindow("OJ-Coherency-1");
 	run("Close");
-	
-	selectWindow("MaskedColorSurvey");
-	setSlice(2); // Saturation
-	setForegroundColor(255, 255, 255);
-	floodFill(0, 0);
-	
-	selectWindow("OJ-Binary Mask-1");
-	run("Select All");
-	run("Copy");
-	selectWindow("MaskedColorSurvey");
-	setSlice(3); // Brightness
-	run("Paste");
-	selectWindow("OJ-Binary Mask-1");
-	run("Close");
-	
-	run("RGB Color");
 	
 	selectWindow(file);
 	close(); // Close original
@@ -626,11 +619,28 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "d - CytoOrient - " + file);
 	close(); // Close color survey
 	
-	selectWindow("MaskedColorSurvey");
+	selectWindow("OJ-Orientation Mask-1");
 	if(full) { // Useful for high-energy noise artifacts and edge effects checking
+		
+		run("16-bit");
+		run("Spectrum");
+		run("Apply LUT");
+		run("RGB Color");
+		run("HSB Stack");
+		selectWindow("OJ-Binary Mask-1");
+		run("Select All");
+		run("Copy");
+		selectWindow("OJ-Orientation Mask-1");
+		setSlice(3); // Brightness
+		run("Paste");
+		run("RGB Color");
+		
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "e - S-CytoOrient - " + file);
 	}
-	close(); // Close Masked Color Survey
+	run("Close"); // OJ-Orientation Mask
+	
+	selectWindow("OJ-Binary Mask-1");
+	run("Close");
 	
 	//return something;
 }
@@ -657,20 +667,32 @@ function CellOrient(output, serial, radius, file, ncells) {
 	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
 	run("HSB Stack");
 	
+	run("Conversions...", " "); // Don't scale when converting to 8-bit
+	
 	selectWindow("OJ-Orientation-1");
+	run("Duplicate...", "title=dup-for-hue"); // [-90,+90] -> [0,255]
+		run("Add...", "value=90");
+		run("Divide...", "value=180");
+		run("Multiply...", "value=255");
+		run("8-bit");
 	run("Select All");
 	run("Copy");
 	selectWindow("ColorSurvey");
 	setSlice(1); // Hue
 	run("Paste");
 	
-	selectWindow("OJ-Coherency-1");
+	selectWindow("OJ-Coherency-1"); // [0,1] -> [0,255]
+	run("Duplicate...", "title=dup-for-sat");
+		run("Multiply...", "value=255");
+		run("8-bit");
 	run("Select All");
 	run("Copy");
 	selectWindow("ColorSurvey");
 	setSlice(2); // Saturation
 	run("Paste");
 	
+	run("Conversions...", "scale"); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit
+
 	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
 	run("Select All");
 	run("Copy");
@@ -682,31 +704,31 @@ function CellOrient(output, serial, radius, file, ncells) {
 	
 	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "c - CellOrient - " + file);
 	close(); // Close saved tiff file
-
+	
 	// Build Coherency-weighted orientation histogram
 	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
-	run("Duplicate...", "title=dup-bright"); // Use Brightness-slice -> Original Binarized Image as Mask
+	run("Duplicate...", "title=dup-for-bright"); // Use Brightness-slice -> Original Binarized Image as Mask
 	run("8-bit"); // Safety
 	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
 	
-	selectWindow("OJ-Coherency-1");
-	run("Duplicate...", "title=dup-coher"); // Use Saturation-slice -> Coherency
-	run("8-bit"); // Safety
-	imageCalculator("Multiply create", "dup-coher", "dup-bright"); // Mask Coherency to make weights for histogram
-	selectWindow("Result of dup-coher");
+	imageCalculator("Multiply create", "dup-for-sat", "dup-for-bright"); // Mask Coherency to make weights for histogram
+	selectWindow("Result of dup-for-sat");
 	rename("weight");
 	
-	selectWindow("dup-bright");
+	selectWindow("dup-for-hue");
 	close();
-	selectWindow("dup-coher");
+	selectWindow("dup-for-sat");
+	close();
+	selectWindow("dup-for-bright");
 	close();
 	
+	run("Conversions...", " "); // Don't scale when converting to 8-bit
 	selectWindow("OJ-Orientation-1");
-	run("Duplicate...", "title=dup-orient"); // Use Hue-slice -> Orientation
-	run("8-bit"); // Safety
-	setMinAndMax(0, 361); // Remap 256 (8-bit) to 180 levels -> rebin histogram! 361 has been empirically tested (256:180=x:256 -> x=364)
-	run("Apply LUT");
+	run("Duplicate...", "title=dup-for-hue2"); // [-90,+90] -> [0,180]
+		run("Add...", "value=90");
+		run("8-bit");
 	run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
+	run("Conversions...", "scale"); // Restore default
 	
 	selectWindow("OJ-Orientation-1");
 	run("Close");
@@ -748,7 +770,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 			run("Convert to Mask");
 			run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
 			
-			imageCalculator("Multiply create", "temp", "dup-orient");
+			imageCalculator("Multiply create", "temp", "dup-for-hue2");
 			selectWindow("Result of temp");
 			getStatistics(areaNoUse, meanNoUse, minNoUse, maxNoUse, stdNoUse, histo);
 			//getHistogram(0, counts, 256); // As an alternative, to return just the histogram
@@ -775,7 +797,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 		setOption("BlackBackground", false);
 		run("Convert to Mask");
 		run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
-		imageCalculator("Multiply create", "temp", "dup-orient");
+		imageCalculator("Multiply create", "temp", "dup-for-hue2");
 		selectWindow("Result of temp");
 		getStatistics(areaNoUse, meanNoUse, minNoUse, maxNoUse, stdNoUse, histo);
 		
@@ -790,7 +812,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 		}
 	}
 	
-	selectWindow("dup-orient");
+	selectWindow("dup-for-hue2");
 	close();
 	selectWindow("weight");
 	close();
