@@ -17,9 +17,12 @@
 //---------------------------------------------------------------------------------------------------//
 // Preliminaries
 //---------------------------------------------------------------------------------------------------//
- 
+
+// Close all open images
+run("Close All");
+
 // Morpheus Version
-morphversion = "0.8/2019";
+morphversion = "0.9/2019";
 // Check ImageJ version: 1.52a or higher is required for Table Functions
 requires("1.52a");
 
@@ -27,10 +30,10 @@ requires("1.52a");
 random("seed", 101);
 
 // Print General Log Information
-systeminfo(morphversion); // A function of mine - see below
+systeminfo(morphversion); // A Morpheus' function - see definition below
 
 // Batch Mode! ...to speed up the macro
-//setBatchMode(true);
+setBatchMode(true);
 
 // Scale from min–max to 0–255 when converting to 8–bit (Default in Morpheus)
 run("Conversions...", "scale");
@@ -79,7 +82,7 @@ for (i = 0; i < 180; i++) {
 // Learn the characteristic features of the single cell from the whole dataset
 run("Set Measurements...", "area shape redirect=None decimal=3");
 // "pop" is an array containing median areas and extreme circularities of each sample image alternately
-pop = GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound); // A function of mine - see below
+pop = GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound); // A Morpheus' function - see definition below
 
 // Check for contents
 if(pop.length == 0) {
@@ -179,7 +182,7 @@ if(orient) {
 }
 
 // Do the Analysis
-ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A function of mine - see below
+ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A Morpheus' function - see definition below
 print("\nTotal sample files processed: ", shortlist.length); // shortlist.length == sampleNum
 selectWindow("MasterMatrix_M");
 print("Total cells identified: ", getWidth(), " out of ", objCounter, " detected objects");
@@ -205,7 +208,7 @@ if (isOpen("Results")) {
 
 // (Eventually) Do the Nucleus Analysis
 if(nucleus) {
-	N_fileNumber = ScanForNucleus(input, output, suffix, suffix2, identifier, typicalArea/10, typicalArea, headings); // A function of mine - see below - WARNING!! C'è accordo sui bounds?
+	N_fileNumber = ScanForNucleus(input, output, suffix, suffix2, identifier, typicalArea/10, typicalArea, headings); // A Morpheus' function - see definition below
 	print("\nTotal \"", identifier, "\" file processed: ", N_fileNumber);
 	selectWindow("MasterMatrix_N");
 	if(N_fileNumber > 0) {
@@ -262,7 +265,7 @@ if(orient) {
     	run("Close");
 	}
 
-	PlotMM2(sampleNum); // A function of mine - see below	
+	PlotMM2(sampleNum); // A Morpheus' function - see definition below
 }
 
 if(verbose) {
@@ -277,7 +280,9 @@ setBatchMode(false); // Note: if orient==true "MasterMatrix_O" will not be close
 selectWindow("Log");  // Select Log-window
 saveAs("text", output + File.separator + "Log.txt"); // Save session Log
 
-selectWindow("MasterMatrix_O.tif");
+if(orient) {
+	selectWindow("MasterMatrix_O.tif");
+}
 
 //---------------------------------------------------------------------------------------------------//
 // Function Definitions
@@ -334,7 +339,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				//Array.print(c); // Debug
 				
 				// Statistics of interest
-				meda = findMedian(a); // A function of mine - see below
+				meda = findMedian(a); // A Morpheus' function - see definition below
 				Array.getStatistics(c, minc, maxc);
 				stat = newArray(meda, minc, maxc);
 				if(verbose) {
@@ -419,8 +424,8 @@ function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, h
 		
 		ncells = nResults;
 		if(orient) {
-			CytoskeletOrient(output, i, shortlist[i], ncells); // A function of mine - see below
-			CellOrient(output, i, radius, shortlist[i], ncells); // A function of mine - see below
+			CytoskeletOrient(output, i, shortlist[i], ncells); // A Morpheus' function - see definition below
+			CellOrient(output, i, radius, shortlist[i], ncells); // A Morpheus' function - see definition below
 		}
 		
 		selectWindow("Drawing of Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
@@ -558,49 +563,8 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	}
 	
 	// Build the Color Survey
-	selectWindow("OJ-Orientation-1");
-	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
-	run("HSB Stack");
+	makeColorSurvey("Result of Original"); // A Morpheus' function - see definition below
 	
-	run("Conversions...", " "); // Don't scale when converting to 8-bit
-	
-	selectWindow("OJ-Orientation-1");
-	run("Duplicate...", "title=dup-for-hue"); // Rescale [-90,+90] -> [0,255]
-		run("Add...", "value=90");
-		run("Divide...", "value=180");
-		run("Multiply...", "value=255");
-		run("8-bit");
-	run("Select All");
-	run("Copy");
-	selectWindow("ColorSurvey");
-	setSlice(1); // Hue
-	run("Paste");
-	
-	selectWindow("OJ-Coherency-1");
-	run("Duplicate...", "title=dup-for-sat"); // Rescale [0,1] -> [0,255]
-		run("Multiply...", "value=255");
-		run("8-bit");
-	run("Select All");
-	run("Copy");
-	selectWindow("ColorSurvey");
-	setSlice(2); // Saturation
-	run("Paste");
-	
-	run("Conversions...", "scale"); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit (Restore default)
-	
-	selectWindow("Result of Original");
-	run("Select All");
-	run("Copy");
-	selectWindow("ColorSurvey");
-	setSlice(3); // Brightness
-	run("Paste");
-	
-	run("RGB Color");
-	
-	selectWindow("dup-for-hue");
-	close();
-	selectWindow("dup-for-sat");
-	close();
 	selectWindow("OJ-Orientation-1");
 	run("Close"); // Don't know why, but OJ output images need to be closed by run("Close") when running in BatchMode. close() command is not effective...
 	selectWindow("OJ-Coherency-1");
@@ -663,45 +627,9 @@ function CellOrient(output, serial, radius, file, ncells) {
 	}
 	
 	// Build the Color Survey
-	selectWindow("OJ-Orientation-1");
-	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
-	run("HSB Stack");
+	makeColorSurvey("Mask of Img_" + i+1 + "a - Segmentation - " + file); // A Morpheus' function - see definition below
 	
-	run("Conversions...", " "); // Don't scale when converting to 8-bit
-	
-	selectWindow("OJ-Orientation-1");
-	run("Duplicate...", "title=dup-for-hue"); // [-90,+90] -> [0,255]
-		run("Add...", "value=90");
-		run("Divide...", "value=180");
-		run("Multiply...", "value=255");
-		run("8-bit");
-	run("Select All");
-	run("Copy");
 	selectWindow("ColorSurvey");
-	setSlice(1); // Hue
-	run("Paste");
-	
-	selectWindow("OJ-Coherency-1"); // [0,1] -> [0,255]
-	run("Duplicate...", "title=dup-for-sat");
-		run("Multiply...", "value=255");
-		run("8-bit");
-	run("Select All");
-	run("Copy");
-	selectWindow("ColorSurvey");
-	setSlice(2); // Saturation
-	run("Paste");
-	
-	run("Conversions...", "scale"); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit
-
-	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
-	run("Select All");
-	run("Copy");
-	selectWindow("ColorSurvey");
-	setSlice(3); // Brightness
-	run("Paste");
-	
-	run("RGB Color");
-	
 	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "c - CellOrient - " + file);
 	close(); // Close saved tiff file
 	
@@ -710,15 +638,14 @@ function CellOrient(output, serial, radius, file, ncells) {
 	run("Duplicate...", "title=dup-for-bright"); // Use Brightness-slice -> Original Binarized Image as Mask
 	run("8-bit"); // Safety
 	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
-	
-	imageCalculator("Multiply create", "dup-for-sat", "dup-for-bright"); // Mask Coherency to make weights for histogram
-	selectWindow("Result of dup-for-sat");
+
+	selectWindow("OJ-Coherency-1"); // [0,1] -> [0,255]
+		run("Multiply...", "value=255");
+		run("8-bit");
+	imageCalculator("Multiply create", "OJ-Coherency-1", "dup-for-bright"); // Mask Coherency to make weights for histogram
+	selectWindow("Result of OJ-Coherency-1");
 	rename("weight");
 	
-	selectWindow("dup-for-hue");
-	close();
-	selectWindow("dup-for-sat");
-	close();
 	selectWindow("dup-for-bright");
 	close();
 	
@@ -727,7 +654,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 	run("Duplicate...", "title=dup-for-hue2"); // [-90,+90] -> [0,180]
 		run("Add...", "value=90");
 		run("8-bit");
-	run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
+	//run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
 	run("Conversions...", "scale"); // Restore default
 	
 	selectWindow("OJ-Orientation-1");
@@ -952,4 +879,55 @@ function systeminfo(morphversion) {
 	}
 	
 	//return something;
+}
+
+// Build the Color Survey
+function makeColorSurvey(brightnessName) {
+	
+	selectWindow("OJ-Orientation-1");
+	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
+	run("HSB Stack");
+	
+	run("Conversions...", " "); // Don't scale when converting to 8-bit
+	
+	selectWindow("OJ-Orientation-1");
+	run("Duplicate...", "title=dup-for-hue"); // Rescale [-90,+90] -> [0,255]
+		run("Add...", "value=90");
+		run("Divide...", "value=180");
+		run("Multiply...", "value=255");
+		run("8-bit");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(1); // Hue
+	run("Paste");
+	
+	selectWindow("OJ-Coherency-1");
+	run("Duplicate...", "title=dup-for-sat"); // Rescale [0,1] -> [0,255]
+		run("Multiply...", "value=255");
+		run("8-bit");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(2); // Saturation
+	run("Paste");
+	
+	run("Conversions...", "scale"); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit (Restore default)
+	
+	selectWindow(brightnessName);
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(3); // Brightness
+	run("Paste");
+	
+	run("RGB Color");
+
+	selectWindow("dup-for-hue");
+	close();
+	selectWindow("dup-for-sat");
+	close();
+	
+	//return something;
+	
 }
