@@ -1,5 +1,6 @@
 // MORPHEUS -- release 2018
 // ImageJ 1.x macro language version
+// OrientationJ Version 19.11.2012 required
 
 // Universal I/O parameter notation
 #@ File(label="Input directory", style="directory") input
@@ -14,10 +15,18 @@
 #@ Boolean(label="Verbose log", value=true) verbose
 
 // Preliminaries
-// Check ImageJ version: 1.52a or higher is required for Table Macro Functions
+// Morpheus Version
+morphversion = "0.6/2018";
+// Check ImageJ version: 1.52a or higher is required for Table Functions
 requires("1.52a");
 // For Reproducibility (when adding noise)
 random("seed", 101);
+
+// Print General Log Information
+systeminfo(morphversion); // A function of mine - see below
+
+// Batch Mode! ...to speed up the macro
+setBatchMode(true);
 
 // Force case-insensitiveness
 suffix = toLowerCase(suffix);
@@ -47,16 +56,6 @@ if(nucleus) {
 
 // Tolerance -> string to integer
 tol = parseInt(tol);
-
-// Starting Morpheus Macro
-print("\\Clear"); // Empty the Log
-print(">------------------------<");
-print("  Starting Morpheus");
-print(">------------------------<");
-print("\n");
-
-// Batch Mode! ...to speed up the macro
-setBatchMode(true);
 
 // Global variables
 var objCounter = 0; //Count all the objects detected
@@ -271,9 +270,9 @@ saveAs("text", output + File.separator + "Log.txt"); // Save session Log
 // Scan to find files with the correct suffix and identifier (e.g. NO DAPI)
 // then compute the statistics of interest (i.e. median area and circularity extreme values) from each sample image
 function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) {
-	
+
+	print("\n");
 	list = getFileList(input);
-	
 	population = newArray();
 	
 	for (i = 0; i < list.length; i++) {
@@ -294,7 +293,8 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			rollingRad = ((getWidth()+getHeight())/2)/6; // To use a rolling ball of such size that 3x3=9 of them would completely fill a square field
 			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
 			run("Smooth");
-			run("Auto Threshold", "method=Li BlackBackground=false");
+			run("Auto Threshold", "method=Li");
+			setOption("BlackBackground", false);
 			run("Make Binary");
 			
 			// Analyze Particles
@@ -448,7 +448,8 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 			rollingRad = ((getWidth()+getHeight())/2)/6;
 			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
 			run("Smooth");
-			run("Auto Threshold", "method=Li BlackBackground=false");
+			run("Auto Threshold", "method=Li");
+			setOption("BlackBackground", false);
 			run("Make Binary");
 			run("Watershed");
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
@@ -497,11 +498,11 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	open(input + File.separator + file);
 	
 	run("Duplicate...", "title=Original");
+	run("Sharpen");
 	run("Enhance Contrast", "saturated=0.35"); // Auto Brightness/Contrast
 	run("Apply LUT");
 	run("8-bit");
-	//run("Smooth");
-
+	
 	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
 	run("Duplicate...", "title=MultiplMask");
 	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
@@ -535,12 +536,12 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	}
 	
 	selectWindow("Color-survey-1");
-	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "d - Cytoskeleton - " + file);
+	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "d - CytoOrient - " + file);
 	close(); // Close color survey
 	
 	selectWindow("S-Color-survey-1");
 	if(full) { // Useful for high-energy noise artifacts and edge effects checking
-		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "e - S-Cytoskeleton - " + file);
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "e - S-CytoOrient - " + file);
 	}
 	close(); // Close Selection color survey
 	
@@ -557,7 +558,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 	selectWindow("Color-survey-1");
 	setBatchMode("show"); // Safety
 	run("Duplicate...", "title=ToSave");
-	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "c - Orientation - " + file);
+	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "c - CellOrient - " + file);
 	close(); // Close saved tiff file
 	
 	selectWindow("Color-survey-1");
@@ -752,5 +753,55 @@ function PlotMM2(sampleNum) {
 	run("Select None");
 	saveAs("tiff", output + File.separator + "MasterMatrix_O.tif");
 
+	//return something;
+}
+
+// Print General Log Information
+function systeminfo(morphversion) {
+	
+	print("\\Clear"); // Empty the Log
+	print(">------------------------<");
+	print("  Starting Morpheus");
+	print(">------------------------<");
+	
+	// Print the Date
+	MonthNames = newArray("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec");
+	DayNames = newArray("Sun", "Mon","Tue","Wed","Thu","Fri","Sat");
+	getDateAndTime(year, month, dayOfWeek, dayOfMonth, hour, minute, second, msec);
+	TimeString = "Date: " + DayNames[dayOfWeek] + " ";
+	if (dayOfMonth<10) {TimeString = TimeString + "0";}
+	TimeString = TimeString+dayOfMonth+"-"+MonthNames[month]+"-"+year+"\nTime: ";
+	if (hour<10) {TimeString = TimeString+"0";}
+	TimeString = TimeString+hour+":";
+	if (minute<10) {TimeString = TimeString+"0";}
+	TimeString = TimeString+minute+":";
+	if (second<10) {TimeString = TimeString+"0";}
+	TimeString = TimeString+second;
+	print("\n" + TimeString);
+	
+	// Print Versioning Info
+	print("\nArchitecture:   " + getInfo("os.arch"));
+	print("Operating system:   " + getInfo("os.name") + "   (version " + getInfo("os.version") + ")");
+	print(getInfo("java.runtime.name") + "   (build " + getInfo("java.version") + ")");
+	print("Java Virtual Machine:   " + getInfo("java.vm.name") + "   (build " + getInfo("java.vm.version") + ")");
+	print("ImageJ version:   " + getVersion());
+	
+	print("\nMorpheus Version:   " + morphversion);
+	print("    Anti-spot lower bound = " + lowBound + " pixel^2");
+	print("    Tolerance = " + tol + " sigma");
+	if(orient) {print("    Orientation analysis option checked");}
+	if(nucleus) {print("    Nucleus analysis option checked (Nucleus identifier = " + identifier + ")");}
+	if(full) {print("    Full output option checked");}
+	if(verbose) {print("    Verbose log option checked");}
+	
+	print("\nRequired Plugin Versions: ");
+	pluginlist = getFileList(getDirectory("plugins"));
+	for (i = 0; i < pluginlist.length; i++) {
+		if(endsWith(pluginlist[i], ".jar")) {
+			if((indexOf(toLowerCase(pluginlist[i]),"auto_threshold") != -1) || (indexOf(toLowerCase(pluginlist[i]),"orientationj") != -1))
+				print("    " + pluginlist[i]);
+		}
+	}
+	
 	//return something;
 }
