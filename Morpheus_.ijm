@@ -1,6 +1,6 @@
-// MORPHEUS -- release 2018
+// MORPHEUS -- release 2019
 // ImageJ 1.x macro language version
-// OrientationJ Version 19.11.2012 required
+// OrientationJ 2.0.3 (15 June 2018) required
 
 // Universal I/O parameter notation
 #@ File(label="Input directory", style="directory") input
@@ -14,11 +14,15 @@
 #@ Boolean(label="Full output", value=false) full
 #@ Boolean(label="Verbose log", value=true) verbose
 
+//---------------------------------------------------------------------------------------------------//
 // Preliminaries
+//---------------------------------------------------------------------------------------------------//
+ 
 // Morpheus Version
-morphversion = "0.6/2018";
+morphversion = "0.7/2019";
 // Check ImageJ version: 1.52a or higher is required for Table Functions
 requires("1.52a");
+
 // For Reproducibility (when adding noise)
 random("seed", 101);
 
@@ -27,6 +31,9 @@ systeminfo(morphversion); // A function of mine - see below
 
 // Batch Mode! ...to speed up the macro
 setBatchMode(true);
+
+// Scale from min–max to 0–255 when converting to 8–bit
+run("Conversions...", "scale");
 
 // Force case-insensitiveness
 suffix = toLowerCase(suffix);
@@ -60,6 +67,10 @@ tol = parseInt(tol);
 // Global variables
 var objCounter = 0; //Count all the objects detected
 var shortlist = newArray();
+var degreeAxis = newArray();
+for (i = 0; i < 180; i++) {
+	degreeAxis = Array.concat(degreeAxis, i-90);
+}
 
 // Learn the characteristic features of the single cell from the whole dataset
 run("Set Measurements...", "area shape redirect=None decimal=3");
@@ -212,8 +223,8 @@ if(nucleus) {
 	flagNoUse = File.delete(output + File.separator + "MasterMatrix_N.xls");
 	saveAs("results", output + File.separator + "MasterMatrix_N.xls");
 	if (isOpen("Results")) {
-	selectWindow("Results");
-    run("Close");
+		selectWindow("Results");
+    	run("Close");
 	}
 }
 
@@ -243,8 +254,8 @@ if(orient) {
 	flagNoUse = File.delete(output + File.separator + "MasterMatrix_O.xls");
 	saveAs("results", output + File.separator + "MasterMatrix_O.xls");
 	if (isOpen("Results")) {
-	selectWindow("Results");
-    run("Close");
+		selectWindow("Results");
+    	run("Close");
 	}
 
 	PlotMM2(sampleNum); // A function of mine - see below	
@@ -509,22 +520,28 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	imageCalculator("Multiply create", "Original", "MultiplMask");
 	
 	// gradient=4 -> Gaussian Gradient
-	run("OrientationJ Distribution", "log=0.0 tensor=1.0 gradient=4 min-coherency=1.0 min-energy=1.0 harris-index=on color-survey=on s-color-survey=on s-distribution=on hue=Orientation sat=Coherency bri=Original-Image");
+	run("OrientationJ Distribution", "tensor=1.0 gradient=4 orientation=on coherency=on radian=off binary=on histogram=on table=on min-coherency=1.0 min-energy=1.0");
 	
-	selectWindow(file);
-	close(); // Close original
-	selectWindow("Original");
-	close(); // Close original duplicate
-	selectWindow("MultiplMask");
-	close(); // Multiplicative Mask
-	selectWindow("Result of Original");
-	close();
+	// Close Table
+	if (isOpen("OJ-Distribution-1")) {
+		selectWindow("OJ-Distribution-1");
+		run("Close");
+	}
 	
-	selectWindow("S-Distribution-1");
+	// Histogram and Normalization factor
+	selectWindow("OJ-Histogram-1-slice-1");
+	if(full) {
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "g - CytoHisto - " + file);
+		close();
+	}		
+	selectWindow("OJ-Histogram-1-slice-1");
+	setBatchMode("show");
 	Plot.showValues();
-	close(); // Close S-Distribution (histogram) window
-
-	// Normalization factor
+	while(isOpen("OJ-Histogram-1-slice-1")){ // For closing multiple Histogram windows
+		selectWindow("OJ-Histogram-1-slice-1");
+		run("Close");
+	}
+	
 	norm = 0;
 	for (row = 0; row < nResults; row++) {
 		norm = norm + getResult("Y", row);
@@ -535,15 +552,85 @@ function CytoskeletOrient(output, serial, file, ncells) {
 		setPixel(row, sampleNum+3+serial, (getResult("Y", row)/norm)*ncells);
 	}
 	
-	selectWindow("Color-survey-1");
+	// Build the Color Survey
+	selectWindow("OJ-Orientation-1");
+	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
+	run("HSB Stack");
+	
+	selectWindow("OJ-Orientation-1");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(1); // Hue
+	run("Paste");
+	selectWindow("OJ-Orientation-1");
+	run("Close"); // Don't know why, but OJ output images need to be closed by run("Close") when running in BatchMode. close() command is not effective...
+	
+	selectWindow("OJ-Coherency-1");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(2); // Saturation
+	run("Paste");
+	selectWindow("OJ-Coherency-1");
+	run("Close");
+	
+	selectWindow("Result of Original");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(3); // Brightness
+	run("Paste");
+	
+	run("RGB Color");
+
+	// Build the Masked Color Survey
+	newImage("MaskedColorSurvey", "RGB black", getWidth(), getHeight(), 1);
+	run("HSB Stack");
+	
+	selectWindow("OJ-Orientation Mask-1");
+	run("Select All");
+	run("Copy");
+	selectWindow("MaskedColorSurvey");
+	setSlice(1); // Hue
+	run("Paste");
+	selectWindow("OJ-Orientation Mask-1");
+	run("Close");
+	
+	selectWindow("MaskedColorSurvey");
+	setSlice(2); // Saturation
+	setForegroundColor(255, 255, 255);
+	floodFill(0, 0);
+	
+	selectWindow("OJ-Binary Mask-1");
+	run("Select All");
+	run("Copy");
+	selectWindow("MaskedColorSurvey");
+	setSlice(3); // Brightness
+	run("Paste");
+	selectWindow("OJ-Binary Mask-1");
+	run("Close");
+	
+	run("RGB Color");
+	
+	selectWindow(file);
+	close(); // Close original
+	selectWindow("Original");
+	close(); // Close original duplicate
+	selectWindow("MultiplMask");
+	close(); // Close multiplicative Mask
+	selectWindow("Result of Original");
+	close(); // Close the result of imageCalculator("Multiply create")
+	
+	selectWindow("ColorSurvey");
 	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "d - CytoOrient - " + file);
 	close(); // Close color survey
 	
-	selectWindow("S-Color-survey-1");
+	selectWindow("MaskedColorSurvey");
 	if(full) { // Useful for high-energy noise artifacts and edge effects checking
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "e - S-CytoOrient - " + file);
 	}
-	close(); // Close Selection color survey
+	close(); // Close Masked Color Survey
 	
 	//return something;
 }
@@ -553,22 +640,57 @@ function CellOrient(output, serial, radius, file, ncells) {
 	
 	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
 	// gradient=4 -> Gaussian Gradient
-	run("OrientationJ Distribution", "log=0.0 tensor=" + radius + " gradient=4 min-coherency=0.0 min-energy=0.0 harris-index=on color-survey=on hue=Orientation sat=Coherency bri=Original-Image");
+	run("OrientationJ Distribution", "tensor=" + radius + " gradient=4 orientation=on coherency=on radian=off histogram=on table=on min-coherency=0.0 min-energy=0.0 ");
 	
-	selectWindow("Color-survey-1");
-	setBatchMode("show"); // Safety
-	run("Duplicate...", "title=ToSave");
+	// Close Table and histograms
+	if (isOpen("OJ-Distribution-1")) {
+		selectWindow("OJ-Distribution-1");
+		run("Close");
+	} 
+	while(isOpen("OJ-Histogram-1-slice-1")){ // For closing multiple Histogram windows
+		selectWindow("OJ-Histogram-1-slice-1");
+		run("Close");
+	}
+	
+	// Build the Color Survey
+	selectWindow("OJ-Orientation-1");
+	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
+	run("HSB Stack");
+	
+	selectWindow("OJ-Orientation-1");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(1); // Hue
+	run("Paste");
+	
+	selectWindow("OJ-Coherency-1");
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(2); // Saturation
+	run("Paste");
+	
+	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
+	run("Select All");
+	run("Copy");
+	selectWindow("ColorSurvey");
+	setSlice(3); // Brightness
+	run("Paste");
+	
+	run("RGB Color");
+	
 	saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "c - CellOrient - " + file);
 	close(); // Close saved tiff file
-	
-	selectWindow("Color-survey-1");
-	run("HSB Stack");
-	run("Duplicate...", "title=dup-bright duplicate range=3-3"); // Use Brightness-slice -> Original Binarized Image as Mask
+
+	// Build Coherency-weighted orientation histogram
+	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
+	run("Duplicate...", "title=dup-bright"); // Use Brightness-slice -> Original Binarized Image as Mask
 	run("8-bit"); // Safety
 	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
 	
-	selectWindow("Color-survey-1");
-	run("Duplicate...", "title=dup-coher duplicate range=2-2"); // Use Saturation-slice -> Coherency
+	selectWindow("OJ-Coherency-1");
+	run("Duplicate...", "title=dup-coher"); // Use Saturation-slice -> Coherency
 	run("8-bit"); // Safety
 	imageCalculator("Multiply create", "dup-coher", "dup-bright"); // Mask Coherency to make weights for histogram
 	selectWindow("Result of dup-coher");
@@ -579,15 +701,19 @@ function CellOrient(output, serial, radius, file, ncells) {
 	selectWindow("dup-coher");
 	close();
 	
-	selectWindow("Color-survey-1");
-	run("Duplicate...", "title=dup-orient duplicate range=1-1"); // Use Hue-slice -> Orientation
+	selectWindow("OJ-Orientation-1");
+	run("Duplicate...", "title=dup-orient"); // Use Hue-slice -> Orientation
 	run("8-bit"); // Safety
 	setMinAndMax(0, 361); // Remap 256 (8-bit) to 180 levels -> rebin histogram! 361 has been empirically tested (256:180=x:256 -> x=364)
 	run("Apply LUT");
 	run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
 	
-	selectWindow("Color-survey-1");
-	close();
+	selectWindow("OJ-Orientation-1");
+	run("Close");
+	selectWindow("OJ-Orientation Mask-1");
+	run("Close");
+	selectWindow("OJ-Coherency-1");
+	run("Close");
 	
 	selectWindow("weight");
 	getStatistics(areaW, meanW, minW, maxW);
@@ -672,13 +798,13 @@ function CellOrient(output, serial, radius, file, ncells) {
 	mainhisto[0] = round((mainhisto[1] + mainhisto[179])/2); // Circular junction
 	
 	if(full) {
-		Plot.create("MainHistogram", "Value", "Count", mainhisto);
+		Plot.create("MainHistogram", "Orientation in Degrees", "Distribution of orientation", degreeAxis, mainhisto); // Same labels of OrientationJ
 		Plot.show();
 		selectWindow("MainHistogram");
-		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Histo_" + serial+1);
+		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "f - CellHisto - " + file);
 		close();
 	}
-
+	
 	// Normalization factor
 	norm = 0;
 	for (row = 0; row < 180; row++) {
