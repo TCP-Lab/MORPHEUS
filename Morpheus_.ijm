@@ -2,7 +2,7 @@
 // ImageJ 1.x macro language version
 // OrientationJ 2.0.2 (or above) required
 
-// Universal I/O parameter notation
+// Universal I/O parameter notation (ImageJ2 required)
 #@ File(label="Input directory", style="directory") input
 #@ File(label="Output directory", style="directory") output
 #@ String(label="File suffix", value=".tif") suffix
@@ -18,13 +18,21 @@
 // Preliminaries
 //---------------------------------------------------------------------------------------------------//
 
-// Close all open images
+// Close all open images and windows
 run("Close All");
+if (isOpen("Results")) {
+	selectWindow("Results");
+    run("Close");
+}
 
 // Morpheus Version
-morphversion = "0.9/2019";
-// Check ImageJ version: 1.52a or higher is required for Table Functions
-requires("1.52a");
+morphversion = "1.0/2019";
+// Check ImageJ version: 1.52a (or higher) is required for Table Functions
+// version 1.52k (or higher) is required for setOption("ScaleConversions", boolean) functions
+requires("1.52k");
+
+// Set Default Options
+setDefaultOptions(); // A Morpheus' function - see definition below
 
 // For Reproducibility (when adding noise)
 random("seed", 101);
@@ -34,9 +42,6 @@ systeminfo(morphversion); // A Morpheus' function - see definition below
 
 // Batch Mode! ...to speed up the macro
 setBatchMode(true);
-
-// Scale from min–max to 0–255 when converting to 8–bit (Default in Morpheus)
-run("Conversions...", "scale");
 
 // Force case-insensitiveness
 suffix = toLowerCase(suffix);
@@ -81,7 +86,7 @@ for (i = 0; i < 180; i++) {
 
 // Learn the characteristic features of the single cell from the whole dataset
 run("Set Measurements...", "area shape redirect=None decimal=3");
-// "pop" is an array containing median areas and extreme circularities of each sample image alternately
+// "pop" is an array containing median areas and extreme circularities of each sample image (sampling distributions)
 pop = GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound); // A Morpheus' function - see definition below
 
 // Check for contents
@@ -153,9 +158,8 @@ if(boundFlag) {
 }
 
 // Blank images used as 2D arrays: use 32-bit images to have a floating point value for each pixel 
-// MasterMatrix_M to store Cell Shape Descriptors
 newImage("decoy", "8-bit black", 10, 10, 1); // Robustness with respect to possible empty images
-run("Set Measurements...", "area perimeter fit shape feret's redirect=None decimal=5"); // Full set of Descriptors (the same both for soma and nucleus)
+run("Set Measurements...", "area perimeter fit shape feret's redirect=None decimal=5"); // Full set of Descriptors (the same for both soma and nucleus)
 run("Measure");
 fullheadings = split(String.getResultsHeadings);
 headings = newArray();
@@ -166,7 +170,7 @@ for (i = 0; i < lengthOf(fullheadings); i++) {
 }
 selectWindow("decoy");
 close();
-
+// MasterMatrix_M to store Cell Shape Descriptors
 newImage("MasterMatrix_M", "32-bit white", 1, lengthOf(headings), 1);
 // MasterMatrix_N to store Nucleus Shape Descriptors
 if(nucleus) {
@@ -182,29 +186,22 @@ if(orient) {
 }
 
 // Do the Analysis
-ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A Morpheus' function - see definition below
+ScanForAnalysis(input, output, lowBound, highBound, lowBoundC, highBoundC, typicalRadius, headings); // A Morpheus' function - see definition below
 print("\nTotal sample files processed: ", shortlist.length); // shortlist.length == sampleNum
 selectWindow("MasterMatrix_M");
 print("Total cells identified: ", getWidth(), " out of ", objCounter, " detected objects");
 
 // Save MasterMatrix_M as output
-run("Rotate 90 Degrees Right"); // Transpose MasterMatrix_M
-run("Flip Horizontally");
-saveAs("text image", output + File.separator + "MasterMatrix_M.txt"); // ...can't save in .xls directly
-close();
-flagNoUse = File.delete(output + File.separator + "MasterMatrix_M.xls"); // Delete any files with the same name, produced by possible previous runs
-flag = File.rename(output + File.separator + "MasterMatrix_M.txt", output + File.separator + "MasterMatrix_M.xls"); // Change extension - Returns "1" (true) if successful
-open(output + File.separator + "MasterMatrix_M.xls");
+flag = saveMatrix("MasterMatrix_M"); // A Morpheus' function - see definition below
+// Add custom headings
 colname = split(Table.headings);
 for (i = 0; i < lengthOf(colname); i++) { // Re-add headings
 	Table.renameColumn(colname[i], headings[i]);
 }
 flagNoUse = File.delete(output + File.separator + "MasterMatrix_M.xls");
 saveAs("results", output + File.separator + "MasterMatrix_M.xls");
-if (isOpen("Results")) {
-	selectWindow("Results");
-    run("Close");
-}
+selectWindow("MasterMatrix_M.xls");
+run("Close");
 
 // (Eventually) Do the Nucleus Analysis
 if(nucleus) {
@@ -216,36 +213,28 @@ if(nucleus) {
 	}
 
 	// Save MasterMatrix_N as output
-	run("Rotate 90 Degrees Right"); // Transpose MasterMatrix_N
-	run("Flip Horizontally");
-	saveAs("text image", output + File.separator + "MasterMatrix_N.txt"); // ...can't save in .xls directly
-	close();
-	flagNoUse = File.delete(output + File.separator + "MasterMatrix_N.xls"); // Delete any files with the same name, produced by possible previous runs
-	flag = flag * File.rename(output + File.separator + "MasterMatrix_N.txt", output + File.separator + "MasterMatrix_N.xls"); // Logic AND
-	open(output + File.separator + "MasterMatrix_N.xls");
+	flag = flag * saveMatrix("MasterMatrix_N"); // Logic AND
+	// Add custom headings
 	colname = split(Table.headings);
 	for (i = 0; i < lengthOf(colname); i++) { // Re-add headings
 		Table.renameColumn(colname[i], headings[i]);
 	}
 	flagNoUse = File.delete(output + File.separator + "MasterMatrix_N.xls");
 	saveAs("results", output + File.separator + "MasterMatrix_N.xls");
-	if (isOpen("Results")) {
-		selectWindow("Results");
-    	run("Close");
-	}
+	selectWindow("MasterMatrix_N.xls");
+	run("Close");
 }
 
 // Plot and Save MasterMatrix_O as output
 if(orient) {
+	// Save MasterMatrix_N as output
 	selectWindow("MasterMatrix_O");
-	run("Rotate 90 Degrees Right"); // Transpose MasterMatrix_O
-	run("Flip Horizontally");
-	run("Flip Vertically"); // To have positive degrees upward and negative degrees downward
-	saveAs("text image", output + File.separator + "MasterMatrix_O.txt"); // ...can't save in .xls directly
-	flagNoUse = File.delete(output + File.separator + "MasterMatrix_O.xls"); // Delete any files with the same name, produced by possible previous runs
-	flag = flag * File.rename(output + File.separator + "MasterMatrix_O.txt", output + File.separator + "MasterMatrix_O.xls"); // Logic AND
-	open(output + File.separator + "MasterMatrix_O.xls");
-	colname = split(Table.headings); // Add headings
+	run("Flip Horizontally"); // To have positive degrees upward and negative degrees downward
+	run("Duplicate...", "title=MasterMatrix_O_image");
+	selectWindow("MasterMatrix_O");
+	flag = flag * saveMatrix("MasterMatrix_O"); // Logic AND
+	// Add custom headings
+	colname = split(Table.headings);
 	Table.renameColumn(colname[0], "Degree");
 	Table.renameColumn(colname[1], "cell->");
 	Table.renameColumn(colname[sampleNum+2], "cytoskeleton->");
@@ -253,26 +242,29 @@ if(orient) {
 		Table.renameColumn(colname[i+2], "Cell_"+toString(i+1));
 		Table.renameColumn(colname[sampleNum+i+3], "Cyto_"+toString(i+1));
 	}
-	for (i = 0; i < 180; i++) { // Empty separation columns
+	for (i = 0; i < 180; i++) { // Empty columns (as separators)
 		Table.set("cell->", i, "");
 		Table.set("cytoskeleton->", i, "");
-	}	
+	}
 	Table.showRowNumbers(false);
 	flagNoUse = File.delete(output + File.separator + "MasterMatrix_O.xls");
 	saveAs("results", output + File.separator + "MasterMatrix_O.xls");
-	if (isOpen("Results")) {
-		selectWindow("Results");
-    	run("Close");
-	}
-
+	selectWindow("MasterMatrix_O.xls");
+	run("Close");
+	
 	PlotMM2(sampleNum); // A Morpheus' function - see definition below
 }
 
 if(verbose) {
-	if(flag == 1)
+	if(flag == 1) // Logic AND
 		print("\nAll output files have been correctly saved to: " + output);
 	else
 		print("\nWARNING !!! Some error occurred while saving data...");
+}
+
+if (isOpen("Results")) {
+	selectWindow("Results");
+    run("Close");
 }
 
 setBatchMode(false); // Note: if orient==true "MasterMatrix_O" will not be closed because it is the active image
@@ -283,6 +275,8 @@ saveAs("text", output + File.separator + "Log.txt"); // Save session Log
 if(orient) {
 	selectWindow("MasterMatrix_O.tif");
 }
+
+// END of Main
 
 //---------------------------------------------------------------------------------------------------//
 // Function Definitions
@@ -307,16 +301,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			}
 			
 			// Segmentation
-			run("Duplicate...", "title=Segment");
-			run("Enhance Contrast", "saturated=0.35");
-			run("Apply LUT");
-			run("8-bit");
-			rollingRad = ((getWidth()+getHeight())/2)/6; // To use a rolling ball of such size that 3x3=9 of them would completely fill a square field
-			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
-			run("Smooth");
-			run("Auto Threshold", "method=Li");
-			setOption("BlackBackground", false);
-			run("Make Binary");
+			MorpheuSegment(list[i], false); // A Morpheus' function - see definition below
 			
 			// Analyze Particles
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
@@ -324,6 +309,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			
 			objCounter = objCounter + nResults;
 
+			// Compute sampling statistics
 			if(nResults > 0) {
 				shortlist = Array.concat(shortlist, list[i]);
 				sampleNum = population.length/3;
@@ -338,10 +324,11 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				//Array.print(a); // Debug
 				//Array.print(c); // Debug
 				
-				// Statistics of interest
+				// Sample statistics of interest
 				meda = findMedian(a); // A Morpheus' function - see definition below
 				Array.getStatistics(c, minc, maxc);
 				stat = newArray(meda, minc, maxc);
+				
 				if(verbose) {
 					print("    Sample_" + sampleNum+1 + " Statistics:");
 					print("        Sample Size = ", nResults);
@@ -379,12 +366,12 @@ function findMedian(x) {
 		median = x[(x.length-1)/2];
 	else if ( (x.length % 2) == 0 ) // Even number of elements
 		median = (x[x.length/2] + x[(x.length/2)-1])/2;
-
+	
 	return median;	
 }
 
 // Do the Analysis
-function ScanForAnalysis(input, output, suffix, suffix2, identifier, lowBound, highBound, minCirc, maxCirc, radius, headings) {
+function ScanForAnalysis(input, output, lowBound, highBound, minCirc, maxCirc, radius, headings) {
 	
 	if(verbose) {
 		print("\n");
@@ -460,19 +447,11 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 			if(verbose) {
 				print("Processing: " + input + File.separator + list[i]);
 			}
-
+			
 			// Segmentation
-			run("Duplicate...", "title=morfo.tif");
-			run("Enhance Contrast", "saturated=0.35");
-			run("Apply LUT");
-			run("8-bit");
-			rollingRad = ((getWidth()+getHeight())/2)/6;
-			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
-			run("Smooth");
-			run("Auto Threshold", "method=Li");
-			setOption("BlackBackground", false);
-			run("Make Binary");
-			run("Watershed");
+			MorpheuSegment(list[i], true); // A Morpheus' function - see definition below
+
+			// Analyze Particles
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
 			run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel show=Outlines exclude clear include");
 
@@ -495,11 +474,11 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 					setPixel(row+getWidth()-nResults, col, getResult(headings[col], row));
 			}
 			
-			selectWindow("Drawing of morfo.tif");
+			selectWindow("Drawing of Segment");
 			saveAs("tiff", output + File.separator + "Nucleus" + File.separator + "N_Img_" + j+1 + "b - Detection - " + list[i]);
 			close(); // Close Nuclei Detection (Outlines)
 			
-			selectWindow("morfo.tif");
+			selectWindow("Segment");
 			saveAs("tiff", output + File.separator + "Nucleus" + File.separator + "N_Img_" + j+1 + "a - Segmentation - " + list[i]);
 			close(); // Close Segmentation image
 			
@@ -513,7 +492,27 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 	return j;
 }
 
-//Cytoskeleton Orientation
+// Segmentation Procedure
+function MorpheuSegment(inName, isNucleus) {
+			
+			selectWindow(inName);
+			run("Duplicate...", "title=Segment"); // Narrow dynamic range
+			run("Enhance Contrast", "saturated=0.35"); // [0,65535]
+			run("Apply LUT");
+			run("8-bit"); // [0,255]
+			rollingRad = ((getWidth()+getHeight())/2)/6; // Rolling ball diameter == 1/3 of image linear dimension
+			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
+			run("Smooth");
+			run("Auto Threshold", "method=Li");
+			run("Make Binary");
+			if (isNucleus) {
+				run("Watershed");
+			}
+			
+			//return something;
+}
+
+// Cytoskeleton Orientation
 function CytoskeletOrient(output, serial, file, ncells) {
 	
 	open(input + File.separator + file);
@@ -586,11 +585,11 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	selectWindow("OJ-Orientation Mask-1");
 	if(full) { // Useful for high-energy noise artifacts and edge effects checking
 		
-		run("16-bit");
+		run("16-bit"); // Dynamic range -> [0,65535]
 		run("Spectrum");
 		run("Apply LUT");
-		run("RGB Color");
-		run("HSB Stack");
+		run("RGB Color"); // Dynamic range -> [0,255]
+		run("HSB Stack"); // Dynamic range -> [0,255]
 		selectWindow("OJ-Binary Mask-1");
 		run("Select All");
 		run("Copy");
@@ -638,7 +637,9 @@ function CellOrient(output, serial, radius, file, ncells) {
 	run("Duplicate...", "title=dup-for-bright"); // Use Brightness-slice -> Original Binarized Image as Mask
 	run("8-bit"); // Safety
 	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
-
+	
+	setOption("ScaleConversions", false); // Don't scale when converting to 8-bit
+	
 	selectWindow("OJ-Coherency-1"); // [0,1] -> [0,255]
 		run("Multiply...", "value=255");
 		run("8-bit");
@@ -649,13 +650,13 @@ function CellOrient(output, serial, radius, file, ncells) {
 	selectWindow("dup-for-bright");
 	close();
 	
-	run("Conversions...", " "); // Don't scale when converting to 8-bit
 	selectWindow("OJ-Orientation-1");
 	run("Duplicate...", "title=dup-for-hue2"); // [-90,+90] -> [0,180]
 		run("Add...", "value=90");
 		run("8-bit");
 	//run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
-	run("Conversions...", "scale"); // Restore default
+	
+	setOption("ScaleConversions", true); // Restore default
 	
 	selectWindow("OJ-Orientation-1");
 	run("Close");
@@ -672,7 +673,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 	
 	mainhisto = newArray(180);
 	
-	if(step >= 1) { // ...that is (maxW < 10)
+	if(step >= 1) { // ...that is (maxW >= 10)
 		for(h=0; h < 10; h++) {
 			
 			// Debug
@@ -693,8 +694,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 			else
 				setThreshold(h*step+1, (h+1)*step);
 			
-			setOption("BlackBackground", false);
-			run("Convert to Mask");
+			run("Convert to Mask");	
 			run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
 			
 			imageCalculator("Multiply create", "temp", "dup-for-hue2");
@@ -716,13 +716,8 @@ function CellOrient(output, serial, radius, file, ncells) {
 	else{
 		//print("unique level", ":", 1, "-", maxW); // Debug
 		
-		selectWindow("weight");
-		run("Duplicate...", "title=temp");		
-		setAutoThreshold("Default dark");
-		call("ij.plugin.frame.ThresholdAdjuster.setMode", "B&W");
-		setThreshold(1, maxW);
-		setOption("BlackBackground", false);
-		run("Convert to Mask");
+		selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
+		run("Duplicate...", "title=temp");
 		run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
 		imageCalculator("Multiply create", "temp", "dup-for-hue2");
 		selectWindow("Result of temp");
@@ -735,7 +730,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 		
 		histo[0] = 0; // Delete background bin (and zero-Coherency pixels)
 		for(k=0; k<180; k++){
-			mainhisto[k] = histo[k]*4.5; // Build weighted histogram (4.5 is the midpoint of the coherency range [1-9])
+			mainhisto[k] = histo[k]*5; // Build weighted histogram (5 is the midpoint in the coherency range [1-9])
 		}
 	}
 	
@@ -770,22 +765,25 @@ function CellOrient(output, serial, radius, file, ncells) {
 // Plot MasterMatrix_O
 function PlotMM2(sampleNum) {
 	
-	selectWindow("MasterMatrix_O");
-	// LUTs can't be applied to 32-bit images -> Convert to 16-bit
-	run("Conversions...", "scale"); // Scale from min–max to 0–65535 when converting from 32–bit to 16–bit
-	getStatistics(areaM, meanM, minM, maxM);
-	setMinAndMax(0, maxM);
-	run("16-bit");
-	
-	makeRectangle(2, 0, sampleNum, 180); // Enhance Contrast to normalize Soma and Cytoskeleton separately, allowing for comparison
-	run("Enhance Contrast", "saturated=0.35");
-	run("Apply LUT");
-	makeRectangle(sampleNum+3, 0, sampleNum, 180);
-	run("Enhance Contrast", "saturated=0.35");
-	run("Apply LUT");
+	// Transpose Matrix
+	selectWindow("MasterMatrix_O_image");
+	run("Rotate 90 Degrees Right");
+	run("Flip Horizontally");
 	
 	makeRectangle(2, 0, 2*sampleNum+1, 180); // Crop "Degree" column
 	run("Crop");
+	
+	getStatistics(areaM, meanM, minM, maxM);
+	setMinAndMax(0, maxM);
+	run("16-bit"); // Dynamic range -> [0,65535]
+	
+	makeRectangle(0, 0, sampleNum, 180); // Enhance Contrast to normalize Soma and Cytoskeleton separately, allowing for comparison
+	run("Enhance Contrast", "saturated=0.35");
+	run("Apply LUT"); // Dynamic range -> [0,65535]
+	makeRectangle(sampleNum+1, 0, sampleNum, 180);
+	run("Enhance Contrast", "saturated=0.35");
+	run("Apply LUT"); // Dynamic range -> [0,65535]
+	run("Select None");
 	
 	// Draw a separation white line between Shape and Cytoskeleton Orientations and apply a LUT
 	getStatistics(areaMM, meanMM, minMM, maxMM);
@@ -793,7 +791,6 @@ function PlotMM2(sampleNum) {
 		setPixel(sampleNum, row, maxMM);
 	}
 	run("Fire");
-	run("Apply LUT"); // Comment to choose whether to apply it or not
 	
 	newHeight = 4*getHeight(); // Magnification 4x
 	newWidth = 4*getWidth();
@@ -819,15 +816,16 @@ function PlotMM2(sampleNum) {
 	
 	makeRectangle(0, 0, 60, 720);
 	run("Copy");
-	selectWindow("MasterMatrix_O");
+	selectWindow("MasterMatrix_O_image");
 	makeRectangle(0, 0, 60, 720);
 	run("Paste");
 	selectWindow("VerticalAxis");
 	close();
-	selectWindow("MasterMatrix_O");
+	
+	selectWindow("MasterMatrix_O_image");
 	run("Select None");
 	saveAs("tiff", output + File.separator + "MasterMatrix_O.tif");
-
+	
 	//return something;
 }
 
@@ -881,14 +879,14 @@ function systeminfo(morphversion) {
 	//return something;
 }
 
-// Build the Color Survey
+// Build the Color Survey in HSB space and then convert to RGB
 function makeColorSurvey(brightnessName) {
 	
 	selectWindow("OJ-Orientation-1");
 	newImage("ColorSurvey", "RGB black", getWidth(), getHeight(), 1);
 	run("HSB Stack");
 	
-	run("Conversions...", " "); // Don't scale when converting to 8-bit
+	setOption("ScaleConversions", false); // Don't scale when converting to 8-bit
 	
 	selectWindow("OJ-Orientation-1");
 	run("Duplicate...", "title=dup-for-hue"); // Rescale [-90,+90] -> [0,255]
@@ -912,7 +910,7 @@ function makeColorSurvey(brightnessName) {
 	setSlice(2); // Saturation
 	run("Paste");
 	
-	run("Conversions...", "scale"); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit (Restore default)
+	setOption("ScaleConversions", true); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit (Restore default)
 	
 	selectWindow(brightnessName);
 	run("Select All");
@@ -922,12 +920,44 @@ function makeColorSurvey(brightnessName) {
 	run("Paste");
 	
 	run("RGB Color");
-
+	
 	selectWindow("dup-for-hue");
 	close();
 	selectWindow("dup-for-sat");
 	close();
 	
 	//return something;
+}
+
+function saveMatrix(inName) {
 	
+	// Transpose Matrix
+	selectWindow(inName);
+	run("Rotate 90 Degrees Right");
+	run("Flip Horizontally");
+	
+	// Save
+	saveAs("text image", output + File.separator + inName + ".txt"); // ...can't save in .xls directly
+	close();
+	flagNoUse = File.delete(output + File.separator + inName + ".xls"); // Delete any files with the same name, produced by possible previous runs
+	flag = File.rename(output + File.separator + inName + ".txt", output + File.separator + inName + ".xls"); // Change extension - Returns "1" (true) if successful
+	Table.open(output + File.separator + inName + ".xls");
+	
+	return flag;
+}
+
+// Morpheus default options
+function setDefaultOptions() {
+	
+	setOption("BlackBackground", false); // Binary and Threshold option
+	//setOption("InvertY", false); // It requires an open image
+	setOption("JFileChooser", false);
+	setOption("Show All", true);
+	run("Input/Output...", "jpeg=85 gif=-1 file=.csv use_file copy_row save_column save_row");
+		setOption("ShowRowNumbers", true); // For "Results" window
+		Table.showRowNumbers(true); // For tables
+	setOption("ScaleConversions", true); // Scale from min–max to 0–255 when converting from 32– or 16-bit to 8–bit (Restore default)
+	//run("Profile Plot Options...", "width=350 height=200 draw"); // To fix plot size (always 350×200 pixels) and style
+	
+	//return something;
 }
