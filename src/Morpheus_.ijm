@@ -1,4 +1,4 @@
-// MORPHEUS -- release Sep-2020
+// MORPHEUS -- release Oct-2020
 // ImageJ 1.x macro language version
 // OrientationJ 2.0.2 (or above) required
 
@@ -12,18 +12,19 @@
 #@ String(label="File suffix", value=".tif") suffix
 #@ String(label="Nucleus file identifier", value="dapi") identifier
 #@ Integer(label="Anti-spot lower bound (pixel^2)", value=200) lowBound
-#@ String(label="Tolerance (sigma)", choices={"1","2","3","4","5","6"}, style="listBox", value="3") tol
+#@ String(label="Tolerance (sigma)", choices={"1","2","3","4","5","6","Infinity"}, style="listBox", value="3") tol
 #@ String (label="Orientation analysis", choices={"None", "Double-Scale", "All Filaments"}, style="radioButtonHorizontal") orientStr
 #@ Boolean(label="Nucleus analysis", value=false) nucleus
 #@ Boolean(label="Full output", value=false) full
 #@ Boolean(label="Verbose log", value=true) verbose
+#@ Boolean(label="Batch Mode", value=true) batchMode
 
 //---------------------------------------------------------------------------------------------------//
 // Preliminaries
 //---------------------------------------------------------------------------------------------------//
 
 // Batch Mode! ...to speed up the macro
-setBatchMode(true);
+setBatchMode(batchMode);
 
 // For Reproducibility (when adding noise)
 random("seed", 101);
@@ -47,7 +48,7 @@ if(verInt < 2)
 requires("1.52k");
 
 // Morpheus Version
-morphversion = "1.2/Oct-2020";
+morphversion = "1.3/Oct-2020";
 
 // Set Default Options
 setDefaultOptions(); // A Morpheus' function - see definition below
@@ -85,8 +86,9 @@ File.makeDirectory(output + File.separator + "Cell");
 if(nucleus)
 	File.makeDirectory(output + File.separator + "Nucleus");
 
-// Remap Tolerance from string to integer
-tol = parseInt(tol);
+// Remap Tolerance from string to integer (if not Infinity)
+if (tol != "Infinity")
+	tol = parseInt(tol);
 
 // Global variables
 var objCounter = 0; // Count all the objects detected
@@ -144,34 +146,41 @@ if(verbose) {
 	print("\n");
 }
 
-// Define new bounds for single cell size and circularity
+// Define new bounds for single cell size
 /* e.g. if tolerance = 3
  * (typicalArea + 3*Standard_Error) = 99.7% Confidence Interval upper bound for the "mean median" statistic
  * 2*(typicalArea + 3*Standard_Error) is a conservative estimate for the predicted typical size of two-cell complex
  * in other words, if an object has a size > highBound can be legitimately suspected to be a complex of two cells
  */
-highBound = 2*(typicalArea + tol*AreaStd/sqrt(sampleNum));
-if(0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum)) > lowBound)
-	lowBound = 0.5*(typicalArea - tol*AreaStd/sqrt(sampleNum));
-
-// High tolerance (6):	typicalMinC + 0*MinCStd AND typicalMaxC - 0*MaxCStd
-// Mid tolerance (3):	typicalMinC + 3*MinCStd AND typicalMaxC - 3*MaxCStd
-// Low tolerance (1):	typicalMinC + 5*MinCStd AND typicalMaxC - 5*MaxCStd
-lowBoundC = typicalMinC + (6-tol)*MinCStd/sqrt(sampleNum);
-highBoundC = typicalMaxC - (6-tol)*MaxCStd/sqrt(sampleNum);
-boundFlag = false;
-if(highBoundC <= lowBoundC) {
-	lowBoundC = typicalMinC;
-	highBoundC = typicalMaxC;
-	boundFlag = true;
+if (tol == "Infinity") { // Take them all (all the segmented objects will be also selected cells)
+	highBound = tol; // lowBound == anti-spot threshold to highBound == Infinity
+} else {
+	highBound = 2*(typicalArea + tol*AreaStd/sqrt(sampleNum));
+	if(0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum)) > lowBound)
+		lowBound = 0.5*(typicalArea - tol*AreaStd/sqrt(sampleNum));
 }
 
-/////////////////////////////////////////////////////////////////////////////
-// Decomment here to remove circularity criterion from selection procedure //
-//lowBoundC = 0;
-//highBoundC = 1;
-/////////////////////////////////////////////////////////////////////////////
+// Define new bounds for single cell circularity
+/* Low tolerance  (1):	typicalMinC + 5*MinCStd to typicalMaxC - 5*MaxCStd
+ * Mid tolerance  (3):	typicalMinC + 3*MinCStd to typicalMaxC - 3*MaxCStd
+ * High tolerance (6):	typicalMinC + 0*MinCStd to typicalMaxC - 0*MaxCStd
+ * Infinite tolerance:	0 to 1 (remove circularity criterion)
+ */
+boundFlag = false;
+if (tol == "Infinity") {
+	lowBoundC = 0;
+	highBoundC = 1;
+} else {
+	lowBoundC = typicalMinC + (6-tol)*MinCStd/sqrt(sampleNum);
+	highBoundC = typicalMaxC - (6-tol)*MaxCStd/sqrt(sampleNum);
+	if(highBoundC <= lowBoundC) {
+		lowBoundC = typicalMinC;
+		highBoundC = typicalMaxC;
+		boundFlag = true;
+	}
+}
 
+// Log the bivariate confidence interval
 print("Single cell size range = [", lowBound, ", ", highBound, "] pixel^2");
 print("Characteristic circularity range = [", lowBoundC, ", ", highBoundC, "]");
 if(boundFlag)
@@ -353,7 +362,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				}
 				population = Array.concat(population, stat);
 				
-				saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + sampleNum+1 + "a - Segmentation - " + list[i]);
+				saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + sampleNum+1 + "a - Segmentation - " + list[i]);				
 				close(); // Close 'Segmentation' image
 			}
 			else {
@@ -643,7 +652,7 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	selectWindow(file);
 	close(); // Close original
 	selectWindow("Original");
-	close(); // Close original duplicate
+	close(); // Close duplicate of original
 	selectWindow("MultiplMask");
 	close(); // Close multiplicative Mask
 	selectWindow("Result of Original");
@@ -936,7 +945,7 @@ function systeminfo(morphversion) {
 	print("    Anti-spot lower bound = " + lowBound + " pixel^2");
 	print("    Tolerance = " + tol + " sigma");
 	if(orient) {print("    Orientation analysis: " + orientStr + " mode");}
-	if(nucleus) {print("    Nucleus analysis: identifier = " + identifier + ")");}
+	if(nucleus) {print("    Nucleus analysis: identifier = " + identifier);}
 	if(full) {print("    Full output option");}
 	if(verbose) {print("    Verbose log option");}
 	
