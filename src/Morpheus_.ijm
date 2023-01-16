@@ -2,6 +2,10 @@
 // ImageJ 1.x macro language version
 // OrientationJ 2.0.2 (or above) required
 
+//---------------------------------------------------------------------------------------------------//
+// Morpheus GUI
+//---------------------------------------------------------------------------------------------------//
+
 // Universal I/O parameter notation (ImageJ2 required)
 #@ File(label="Input directory", style="directory") input
 #@ File(label="Output directory", style="directory") output
@@ -9,7 +13,7 @@
 #@ String(label="Nucleus file identifier", value="dapi") identifier
 #@ Integer(label="Anti-spot lower bound (pixel^2)", value=200) lowBound
 #@ String(label="Tolerance (sigma)", choices={"1","2","3","4","5","6"}, style="listBox", value="3") tol
-#@ String (label="Orientation analysis", choices={"None", "Double Scale", "All Filaments"}, style="radioButtonHorizontal") orientStr
+#@ String (label="Orientation analysis", choices={"None", "Double-Scale", "All Filaments"}, style="radioButtonHorizontal") orientStr
 #@ Boolean(label="Nucleus analysis", value=false) nucleus
 #@ Boolean(label="Full output", value=false) full
 #@ Boolean(label="Verbose log", value=true) verbose
@@ -18,6 +22,12 @@
 // Preliminaries
 //---------------------------------------------------------------------------------------------------//
 
+// Batch Mode! ...to speed up the macro
+setBatchMode(true);
+
+// For Reproducibility (when adding noise)
+random("seed", 101);
+
 // Close all open images and windows
 run("Close All");
 if (isOpen("Results")) {
@@ -25,17 +35,22 @@ if (isOpen("Results")) {
     run("Close");
 }
 
-// Morpheus Version
-morphversion = "1.1/Sep-2020";
-// Check ImageJ version: 1.52a (or higher) is required for Table Functions
+// Check ImageJ version:
+// ImageJ2 (or Fiji) is required for #@ parameter notation
+ver = getVersion(); // ImageJ -> 1.53e, while ImageJ2 -> 2.1.0/1.53e
+verArray = split(ver,"./"); // Get an array of strings: 2,1,0,1,53e
+verInt = parseInt(verArray[0]); // Convert the first element to an integer
+if(verInt < 2)
+	exit("Morpheus requires ImageJ2 (or Fiji).");
+// 1.52a (or higher) is required for Table Functions
 // version 1.52k (or higher) is required for setOption("ScaleConversions", boolean) functions
 requires("1.52k");
 
+// Morpheus Version
+morphversion = "1.2/Oct-2020";
+
 // Set Default Options
 setDefaultOptions(); // A Morpheus' function - see definition below
-
-// For Reproducibility (when adding noise)
-random("seed", 101);
 
 // Remap orientStr to boolean
 if (orientStr == "None")
@@ -45,9 +60,6 @@ else
 
 // Print General Information as Log
 systeminfo(morphversion); // A Morpheus' function - see definition below
-
-// Batch Mode! ...to speed up the macro
-setBatchMode(true);
 
 // Force case-insensitiveness
 suffix = toLowerCase(suffix);
@@ -79,7 +91,7 @@ tol = parseInt(tol);
 // Global variables
 var objCounter = 0; // Count all the objects detected
 var shortlist = newArray(); // The subset of "list" containing only those files suitable for morphometric analysis
-var degreeAxis = newArray();
+var degreeAxis = newArray(); // -90:1:89 array
 for (i = 0; i < 180; i++)
 	degreeAxis = Array.concat(degreeAxis, i-90);
 
@@ -153,6 +165,12 @@ if(highBoundC <= lowBoundC) {
 	highBoundC = typicalMaxC;
 	boundFlag = true;
 }
+
+/////////////////////////////////////////////////////////////////////////////
+// Decomment here to remove circularity criterion from selection procedure //
+//lowBoundC = 0;
+//highBoundC = 1;
+/////////////////////////////////////////////////////////////////////////////
 
 print("Single cell size range = [", lowBound, ", ", highBound, "] pixel^2");
 print("Characteristic circularity range = [", lowBoundC, ", ", highBoundC, "]");
@@ -280,7 +298,7 @@ if(orient)
 // Function Definitions
 //---------------------------------------------------------------------------------------------------//
 
-// Scan to find files with the correct suffix and identifier (e.g. NO DAPI)
+// Search for files with the correct suffix and identifier (e.g. NO DAPI)
 // then compute the statistics of interest (i.e. median area and circularity extreme values) from each sample image
 function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) {
 
@@ -296,7 +314,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			open(input + File.separator + list[i]);
 			if(verbose)
 				print("Pre-Processing: " + input + File.separator + list[i]);
-			
+				
 			// Segmentation
 			MorpheuSegment(list[i], false); // A Morpheus' function - see definition below
 			
@@ -305,7 +323,7 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 			run("Analyze Particles...", "size=" + lowBound + "-Infinity pixel circularity=0-1 show=Nothing exclude clear include");
 			
 			objCounter = objCounter + nResults;
-
+			
 			// Compute sampling statistics
 			if(nResults > 0) {
 				shortlist = Array.concat(shortlist, list[i]);
@@ -407,7 +425,7 @@ function ScanForAnalysis(input, output, lowBound, highBound, minCirc, maxCirc, r
 		ncells = nResults;
 		if(orient) {
 			CytoskeletOrient(output, i, shortlist[i], ncells); // A Morpheus' function - see definition below
-			if (orientStr == "Double Scale")
+			if (orientStr == "Double-Scale")
 				CellOrient(output, i, radius, shortlist[i], ncells); // A Morpheus' function - see definition below
 		}
 		
@@ -430,7 +448,7 @@ function ScanForAnalysis(input, output, lowBound, highBound, minCirc, maxCirc, r
 function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, highBound, headings) {
 	
 	list = getFileList(input);
-	j = 0; // Count only the files with the correct suffix and identifier
+	j = 0; // Count just the files with the correct suffix and identifier
 	
 	if(verbose)
 		print("\n");
@@ -488,12 +506,13 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 
 // Segmentation Procedure
 function MorpheuSegment(inName, isNucleus) {
-			
+	
 	selectWindow(inName);
-	run("Duplicate...", "title=Segment"); // Narrow dynamic range
-	run("Enhance Contrast", "saturated=0.35"); // [0,65535]
-	run("Apply LUT");
-	run("8-bit"); // [0,255]
+	run("Duplicate...", "title=Segment");
+	
+	// Enhance contrast to increase the dynamic range
+	MorpheusEnhance(); // A Morpheus' function - see definition below
+	
 	rollingRad = ((getWidth()+getHeight())/2)/6; // Rolling ball diameter == 1/3 of image linear dimension
 	run("Subtract Background...", "rolling=" + rollingRad + " sliding");
 	run("Smooth");
@@ -505,25 +524,77 @@ function MorpheuSegment(inName, isNucleus) {
 	//return something;
 }
 
+// Robust Enhance Contrast
+function MorpheusEnhance() {
+	
+	run("8-bit"); // RGB/16-bit to 8-bit conversion
+	
+	minLev = 64; // Minimum number of gray levels required for saturation
+	sat = 0.05; // Starting percentage of saturated pixels
+	getStatistics(size, meanNoUse, minPix, maxPix); // size == getWidth()*getHeight()
+	getHistogram(values, counts, 256);
+	
+	if ((maxPix-minPix) > minLev) {
+		do {
+			cum = 0; // "Right" cumulative distribution function (1-CDF)
+			i = 0; // Threshold "right" quantile
+			
+			do {
+				cum = cum + counts[255-i];
+				i = i + 1;
+			} while (cum < (sat/100)*size);
+			
+			// Decrease sat when gray levels are too few
+			//(it avoids background-noise amplification by false contours)
+			sat = sat / 2;
+			
+		} while (256-i < minLev);
+	} else {
+		i = 256 - maxPix;
+		sat = 0;
+	}
+	
+	maxLocs = Array.findMaxima(counts, sqrt(size)); // Returns an array holding the peak positions sorted with descending strength
+	mode = maxLocs[0];
+	
+	// Debug
+	/*
+	print("Max set to: " + 256-i);
+	print("Up-Saturated: " + sat*2 + " %");
+	print("Histogram peaks:");
+	Array.print(maxLocs);
+	print("Mode: " + mode);
+	print("Min set to: " + mode+1);
+	*/
+	
+	setMinAndMax(mode+1, 256-i); // min = mode+1 to exclude background
+	run("Apply LUT");
+	
+	//return something;
+}
+
 // Cytoskeleton Orientation
 function CytoskeletOrient(output, serial, file, ncells) {
 	
 	open(input + File.separator + file);
 	
 	run("Duplicate...", "title=Original");
-	run("Sharpen");
-	run("Enhance Contrast", "saturated=0.35"); // Auto Brightness/Contrast
-	run("Apply LUT");
-	run("8-bit");
+	run("Sharpen"); // Optional
 	
-	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
-	run("Duplicate...", "title=MultiplMask");
-	if (orientStr == "All Filaments")
-		run("Macro...", "code=v=1"); // Constant 1 (Identity Multiplicative Mask)
-	else //if (orientStr == "Double Scale")
-		run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
+	// Enhance contrast to increase the dynamic range
+	MorpheusEnhance(); // A Morpheus' function - see definition below
 	
-	imageCalculator("Multiply create", "Original", "MultiplMask");
+	if (orientStr == "All Filaments") {
+		selectWindow("Img_" + i+1 + "a - Segmentation - " + file); // Morpheus Segmentation Mask
+		run("Duplicate...", "title=MultiplMask");
+		run("Invert");
+	} else { //if (orientStr == "Double-Scale")
+		selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file); // Morpheus Detection Mask
+		run("Duplicate...", "title=MultiplMask");
+	}
+	
+	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
+	imageCalculator("Multiply create", "Original", "MultiplMask"); // This creates a new image called "Result of Original"
 	
 	// gradient=4 -> Gaussian Gradient
 	run("OrientationJ Distribution", "tensor=1.0 gradient=4 orientation=on coherency=on radian=off binary=on histogram=on table=on min-coherency=1.0 min-energy=1.0");
@@ -540,7 +611,7 @@ function CytoskeletOrient(output, serial, file, ncells) {
 		for (row = 0; row < 180; row++) {
 			setPixel(row, sampleNum+3+serial, orVal[row]); // No Normalization
 		}
-	} else { //if (orientStr == "Double Scale") {
+	} else { //if (orientStr == "Double-Scale")
 		norm = 0;
 		for (row = 0; row < 180; row++) {
 			norm = norm + orVal[row];
@@ -556,7 +627,7 @@ function CytoskeletOrient(output, serial, file, ncells) {
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "g - CytoHisto - " + file);
 		close();
 	}
-	while(isOpen("OJ-Histogram-1-slice-1")) { // For closing multiple Histogram windows
+	while(isOpen("OJ-Histogram-1-slice-1")) { // To close multiple Histogram windows
 		selectWindow("OJ-Histogram-1-slice-1");
 		run("Close");
 	}
@@ -583,7 +654,7 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	close(); // Close color survey
 	
 	selectWindow("OJ-Orientation Mask-1");
-	if(full) { // Useful for high-energy noise artifacts and edge effects checking
+	if(full) { // Useful for high-energy noise artifacts and edge effect checking
 		
 		run("16-bit"); // Dynamic range -> [0,65535]
 		run("Spectrum");
@@ -620,7 +691,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 		selectWindow("OJ-Distribution-1");
 		run("Close");
 	}
-	while(isOpen("OJ-Histogram-1-slice-1")){ // For closing multiple Histogram windows
+	while(isOpen("OJ-Histogram-1-slice-1")){ // To close multiple Histogram windows
 		selectWindow("OJ-Histogram-1-slice-1");
 		run("Close");
 	}
@@ -640,8 +711,8 @@ function CellOrient(output, serial, radius, file, ncells) {
 	
 	setOption("ScaleConversions", false); // Don't scale when converting to 8-bit
 	
-	selectWindow("OJ-Coherency-1"); // [0,1] -> [0,255]
-	run("Multiply...", "value=255");
+	selectWindow("OJ-Coherency-1");
+	run("Multiply...", "value=255"); // [0,1] -> [0,255]
 	run("8-bit");
 	imageCalculator("Multiply create", "OJ-Coherency-1", "dup-for-bright"); // Mask Coherency to make weights for histogram
 	selectWindow("Result of OJ-Coherency-1");
@@ -778,10 +849,10 @@ function PlotMM2(sampleNum) {
 	run("16-bit"); // Dynamic range -> [0,65535]
 	
 	makeRectangle(0, 0, sampleNum, 180); // Enhance Contrast to normalize Soma and Cytoskeleton separately, allowing for comparison
-	run("Enhance Contrast", "saturated=0.35");
+	run("Enhance Contrast", "saturated=0");
 	run("Apply LUT"); // Dynamic range -> [0,65535]
 	makeRectangle(sampleNum+1, 0, sampleNum, 180);
-	run("Enhance Contrast", "saturated=0.35");
+	run("Enhance Contrast", "saturated=0");
 	run("Apply LUT"); // Dynamic range -> [0,65535]
 	run("Select None");
 	
@@ -864,10 +935,10 @@ function systeminfo(morphversion) {
 	print("\nMorpheus Version:   " + morphversion);
 	print("    Anti-spot lower bound = " + lowBound + " pixel^2");
 	print("    Tolerance = " + tol + " sigma");
-	if(orient) {print("    Orientation analysis option checked (" + orientStr + " mode)");}
-	if(nucleus) {print("    Nucleus analysis option checked (Nucleus identifier = " + identifier + ")");}
-	if(full) {print("    Full output option checked");}
-	if(verbose) {print("    Verbose log option checked");}
+	if(orient) {print("    Orientation analysis: " + orientStr + " mode");}
+	if(nucleus) {print("    Nucleus analysis: identifier = " + identifier + ")");}
+	if(full) {print("    Full output option");}
+	if(verbose) {print("    Verbose log option");}
 	
 	print("\nRequired Plugin Versions: ");
 	pluginlist = getFileList(getDirectory("plugins"));
@@ -912,7 +983,7 @@ function makeColorSurvey(brightnessName) {
 	setSlice(2); // Saturation
 	run("Paste");
 	
-	setOption("ScaleConversions", true); // Scale from min–max to 0–255 when converting from 32–bit to 8–bit (Restore default)
+	setOption("ScaleConversions", true); // Restore default
 	
 	selectWindow(brightnessName);
 	run("Select All");
@@ -958,7 +1029,7 @@ function setDefaultOptions() {
 	run("Input/Output...", "jpeg=85 gif=-1 file=.csv use_file copy_row save_column save_row");
 		setOption("ShowRowNumbers", true); // For "Results" window
 		Table.showRowNumbers(true); // For tables
-	setOption("ScaleConversions", true); // Scale from min–max to 0–255 when converting from 32– or 16-bit to 8–bit (Restore default)
+	setOption("ScaleConversions", true); // Scale from min–max to 0–255 when converting from 32– or 16-bit to 8–bit (Morpheus' default)
 	//run("Profile Plot Options...", "width=350 height=200 draw"); // To fix plot size (always 350×200 pixels) and style
 	
 	//return something;
