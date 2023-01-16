@@ -1,4 +1,4 @@
-// MORPHEUS -- release 2019
+// MORPHEUS -- release Sep-2020
 // ImageJ 1.x macro language version
 // OrientationJ 2.0.2 (or above) required
 
@@ -9,7 +9,7 @@
 #@ String(label="Nucleus file identifier", value="dapi") identifier
 #@ Integer(label="Anti-spot lower bound (pixel^2)", value=200) lowBound
 #@ String(label="Tolerance (sigma)", choices={"1","2","3","4","5","6"}, style="listBox", value="3") tol
-#@ Boolean(label="Orientation analysis", value=false) orient
+#@ String (label="Orientation analysis", choices={"None", "Double Scale", "All Filaments"}, style="radioButtonHorizontal") orientStr
 #@ Boolean(label="Nucleus analysis", value=false) nucleus
 #@ Boolean(label="Full output", value=false) full
 #@ Boolean(label="Verbose log", value=true) verbose
@@ -26,7 +26,7 @@ if (isOpen("Results")) {
 }
 
 // Morpheus Version
-morphversion = "1.0/2019";
+morphversion = "1.1/Sep-2020";
 // Check ImageJ version: 1.52a (or higher) is required for Table Functions
 // version 1.52k (or higher) is required for setOption("ScaleConversions", boolean) functions
 requires("1.52k");
@@ -37,7 +37,13 @@ setDefaultOptions(); // A Morpheus' function - see definition below
 // For Reproducibility (when adding noise)
 random("seed", 101);
 
-// Print General Log Information
+// Remap orientStr to boolean
+if (orientStr == "None")
+	orient = false;
+else
+	orient = true;
+
+// Print General Information as Log
 systeminfo(morphversion); // A Morpheus' function - see definition below
 
 // Batch Mode! ...to speed up the macro
@@ -59,26 +65,23 @@ if(endsWith(suffix, "jpeg") || endsWith(suffix, "jpg")) {
 }
 
 // Safety option
-if(lengthOf(identifier) == 0) {
+if(lengthOf(identifier) == 0)
 	identifier = "dapi";
-}
 
 // Organize Output Directory
 File.makeDirectory(output + File.separator + "Cell");
-if(nucleus) {
+if(nucleus)
 	File.makeDirectory(output + File.separator + "Nucleus");
-}
 
-// Tolerance -> string to integer
+// Remap Tolerance from string to integer
 tol = parseInt(tol);
 
 // Global variables
-var objCounter = 0; //Count all the objects detected
-var shortlist = newArray();
+var objCounter = 0; // Count all the objects detected
+var shortlist = newArray(); // The subset of "list" containing only those files suitable for morphometric analysis
 var degreeAxis = newArray();
-for (i = 0; i < 180; i++) {
+for (i = 0; i < 180; i++)
 	degreeAxis = Array.concat(degreeAxis, i-90);
-}
 
 //---------------------------------------------------------------------------------------------------//
 // Main
@@ -91,7 +94,7 @@ pop = GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound); //
 
 // Check for contents
 if(pop.length == 0) {
-	messageOut = "No file with " + suffix + " suffix and suitable for cell morphometry is present in the folder\n" + input;
+	messageOut = "No suitable " + suffix + " files have been detected in the folder\n" + input;
 	print(messageOut);
 	exit(messageOut);
 }
@@ -117,7 +120,7 @@ if(verbose) {
 	Array.print(popMaxC);
 }
 
-// Define typical cell area and circularity range as the means of their corresponding sampling distributions 
+// Define typical cell area and circularity range using the means of their corresponding sampling distributions 
 Array.getStatistics(popAreas, minNoUse, maxNoUse, typicalArea, AreaStd);
 typicalRadius = sqrt(typicalArea/PI);
 Array.getStatistics(popMinC, minNoUse, maxNoUse, typicalMinC, MinCStd);
@@ -136,12 +139,12 @@ if(verbose) {
  * in other words, if an object has a size > highBound can be legitimately suspected to be a complex of two cells
  */
 highBound = 2*(typicalArea + tol*AreaStd/sqrt(sampleNum));
-if(0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum)) > lowBound) {
+if(0.5*(typicalArea-tol*AreaStd/sqrt(sampleNum)) > lowBound)
 	lowBound = 0.5*(typicalArea - tol*AreaStd/sqrt(sampleNum));
-}
-// Highest tolerance (6):	typicalMinC + 0*MinCStd AND typicalMaxC - 0*MaxCStd
-// Mid tolerance (3):		typicalMinC + 3*MinCStd AND typicalMaxC - 3*MaxCStd
-// Lowest tolerance (1):	typicalMinC + 5*MinCStd AND typicalMaxC - 5*MaxCStd
+
+// High tolerance (6):	typicalMinC + 0*MinCStd AND typicalMaxC - 0*MaxCStd
+// Mid tolerance (3):	typicalMinC + 3*MinCStd AND typicalMaxC - 3*MaxCStd
+// Low tolerance (1):	typicalMinC + 5*MinCStd AND typicalMaxC - 5*MaxCStd
 lowBoundC = typicalMinC + (6-tol)*MinCStd/sqrt(sampleNum);
 highBoundC = typicalMaxC - (6-tol)*MaxCStd/sqrt(sampleNum);
 boundFlag = false;
@@ -153,9 +156,8 @@ if(highBoundC <= lowBoundC) {
 
 print("Single cell size range = [", lowBound, ", ", highBound, "] pixel^2");
 print("Characteristic circularity range = [", lowBoundC, ", ", highBoundC, "]");
-if(boundFlag) {
+if(boundFlag)
 	print("WARNING: Circularity bounds have been restored to the average extreme values because of a too low tolerance value");
-}
 
 // Blank images used as 2D arrays: use 32-bit images to have a floating point value for each pixel 
 newImage("decoy", "8-bit black", 10, 10, 1); // Robustness with respect to possible empty images
@@ -164,21 +166,19 @@ run("Measure");
 fullheadings = split(String.getResultsHeadings);
 headings = newArray();
 for (i = 0; i < lengthOf(fullheadings); i++) {
-	if (fullheadings[i] != "FeretX" && fullheadings[i] != "FeretY") { // Delete uninformative measurements
+	if (fullheadings[i] != "FeretX" && fullheadings[i] != "FeretY") // Delete uninformative measurements
 		headings = Array.concat(headings,fullheadings[i]);
-	}
 }
 selectWindow("decoy");
 close();
 // MasterMatrix_M to store Cell Shape Descriptors
 newImage("MasterMatrix_M", "32-bit white", 1, lengthOf(headings), 1);
 // MasterMatrix_N to store Nucleus Shape Descriptors
-if(nucleus) {
+if(nucleus)
 	newImage("MasterMatrix_N", "32-bit white", 1, lengthOf(headings), 1);
-}
-// MasterMatrix_O to store Cell and Cytoskeleton Orientations
+// MasterMatrix_O to store Cell and/or Cytoskeleton Orientations
 if(orient) {
-	newImage("MasterMatrix_O", "32-bit white", 180, 2*sampleNum+3, 1); // +3 because of a degree column + 2 separation columns
+	newImage("MasterMatrix_O", "32-bit white", 180, 2*sampleNum+3, 1); // +3 because of 1 degree column + 2 separation columns
 	selectWindow("MasterMatrix_O");
 	for (row = 0; row < 180; row++) { // Add degree column
 		setPixel(row,0,-90+row);
@@ -203,15 +203,14 @@ saveAs("results", output + File.separator + "MasterMatrix_M.xls");
 selectWindow("MasterMatrix_M.xls");
 run("Close");
 
-// (Eventually) Do the Nucleus Analysis
+// Do the Nucleus Analysis (Optional)
 if(nucleus) {
-	N_fileNumber = ScanForNucleus(input, output, suffix, suffix2, identifier, typicalArea/10, typicalArea, headings); // A Morpheus' function - see definition below
-	print("\nTotal \"", identifier, "\" file processed: ", N_fileNumber);
+	N_fileNumber = ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound/10, typicalArea, headings); // A Morpheus' function - see definition below
+	print("Total \"", identifier, "\" file processed: ", N_fileNumber);
 	selectWindow("MasterMatrix_N");
-	if(N_fileNumber > 0) {
+	if(N_fileNumber > 0)
 		print("Total nuclei identified: ", getWidth());
-	}
-
+	
 	// Save MasterMatrix_N as output
 	flag = flag * saveMatrix("MasterMatrix_N"); // Logic AND
 	// Add custom headings
@@ -227,7 +226,7 @@ if(nucleus) {
 
 // Plot and Save MasterMatrix_O as output
 if(orient) {
-	// Save MasterMatrix_N as output
+	// Save MasterMatrix_O as output
 	selectWindow("MasterMatrix_O");
 	run("Flip Horizontally"); // To have positive degrees upward and negative degrees downward
 	run("Duplicate...", "title=MasterMatrix_O_image");
@@ -267,14 +266,13 @@ if (isOpen("Results")) {
     run("Close");
 }
 
-setBatchMode(false); // Note: if orient==true "MasterMatrix_O" will not be closed because it is the active image
+setBatchMode(false); // Note: even in BatchMode (when orient==true) "MasterMatrix_O" is left open because it is the current active image
 
 selectWindow("Log");  // Select Log-window
 saveAs("text", output + File.separator + "Log.txt"); // Save session Log
 
-if(orient) {
+if(orient)
 	selectWindow("MasterMatrix_O.tif");
-}
 
 // END of Main
 
@@ -296,16 +294,15 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 		if((endsWith(toLowerCase(list[i]), suffix) || endsWith(toLowerCase(list[i]), suffix2)) && indexOf(toLowerCase(list[i]), identifier) == -1) {
 			
 			open(input + File.separator + list[i]);
-			if(verbose) {
+			if(verbose)
 				print("Pre-Processing: " + input + File.separator + list[i]);
-			}
 			
 			// Segmentation
 			MorpheuSegment(list[i], false); // A Morpheus' function - see definition below
 			
 			// Analyze Particles
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
-			run("Analyze Particles...", "size=" + lowBound + "-Infinity pixel show=Nothing exclude clear include");
+			run("Analyze Particles...", "size=" + lowBound + "-Infinity pixel circularity=0-1 show=Nothing exclude clear include");
 			
 			objCounter = objCounter + nResults;
 
@@ -342,9 +339,9 @@ function GetSamplingDistributions(input, suffix, suffix2, identifier, lowBound) 
 				close(); // Close 'Segmentation' image
 			}
 			else {
-				if(verbose) {
+				if(verbose)
 					print("WARNING: there are no detectable objects in this image. It may be void.");
-				}
+				close(); // Close 'Segmentation' (empty) image
 			}
 			
 			selectWindow(list[i]);
@@ -373,31 +370,29 @@ function findMedian(x) {
 // Do the Analysis
 function ScanForAnalysis(input, output, lowBound, highBound, minCirc, maxCirc, radius, headings) {
 	
-	if(verbose) {
+	if(verbose)
 		print("\n");
-	}
 	
 	for (i = 0; i < shortlist.length; i++) {
-		if(verbose) {
+		if(verbose)
 			print("Processing: " + input + File.separator + shortlist[i]);
-		}
 		
 		open(output + File.separator + "Cell" + File.separator + "Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
 		
 		// Selection of isolated cells
 		run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
-		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Outlines exclude clear include");
+		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Outlines display exclude clear include");
 		selectWindow("Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
-		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Masks exclude clear include");
+		run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=" + minCirc + "-" + maxCirc + " show=Masks display exclude clear include");
 		
 		if (nResults > 0) {
+			selectWindow("Results");
 			Table.deleteColumn("FeretX"); // Delete uninformative measurements
 			Table.deleteColumn("FeretY"); // Delete uninformative measurements
 			saveAs("results", output + File.separator + "Cell" + File.separator + "Descriptors_" + i+1 + ".xls");
 		}
 		
 		selectWindow("MasterMatrix_M");
-		
 		if(i == 0)
 			extendWidth = nResults;
 		else
@@ -412,7 +407,8 @@ function ScanForAnalysis(input, output, lowBound, highBound, minCirc, maxCirc, r
 		ncells = nResults;
 		if(orient) {
 			CytoskeletOrient(output, i, shortlist[i], ncells); // A Morpheus' function - see definition below
-			CellOrient(output, i, radius, shortlist[i], ncells); // A Morpheus' function - see definition below
+			if (orientStr == "Double Scale")
+				CellOrient(output, i, radius, shortlist[i], ncells); // A Morpheus' function - see definition below
 		}
 		
 		selectWindow("Drawing of Img_" + i+1 + "a - Segmentation - " + shortlist[i]);
@@ -436,33 +432,31 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 	list = getFileList(input);
 	j = 0; // Count only the files with the correct suffix and identifier
 	
-	if(verbose) {
+	if(verbose)
 		print("\n");
-	}
 	
 	for (i = 0; i < list.length; i++) {
 		if((endsWith(toLowerCase(list[i]), suffix) || endsWith(toLowerCase(list[i]), suffix2)) && indexOf(toLowerCase(list[i]), identifier) != -1) { // Search for files with the "identifier" substring within their name
 			
 			open(input + File.separator + list[i]);
-			if(verbose) {
+			if(verbose)
 				print("Processing: " + input + File.separator + list[i]);
-			}
 			
 			// Segmentation
 			MorpheuSegment(list[i], true); // A Morpheus' function - see definition below
 
 			// Analyze Particles
 			run("Set Scale...", "distance=0 known=0 pixel=1 unit=pixel"); // "Click to Remove Scale" option - Force pixel as unit of length
-			run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel show=Outlines exclude clear include");
+			run("Analyze Particles...", "size=" + lowBound + "-" + highBound + " pixel circularity=0.7-1 show=Outlines display exclude clear include");
 
 			if (nResults > 0) {
+				selectWindow("Results");
 				Table.deleteColumn("FeretX"); // Delete uninformative measurements
 				Table.deleteColumn("FeretY"); // Delete uninformative measurements
 				saveAs("results", output + File.separator + "Nucleus" + File.separator + "N_Descriptors_" + j+1 + ".xls");
 			}
 			
 			selectWindow("MasterMatrix_N");
-			
 			if(j == 0)
 				extendWidth = nResults;
 			else
@@ -495,21 +489,20 @@ function ScanForNucleus(input, output, suffix, suffix2, identifier, lowBound, hi
 // Segmentation Procedure
 function MorpheuSegment(inName, isNucleus) {
 			
-			selectWindow(inName);
-			run("Duplicate...", "title=Segment"); // Narrow dynamic range
-			run("Enhance Contrast", "saturated=0.35"); // [0,65535]
-			run("Apply LUT");
-			run("8-bit"); // [0,255]
-			rollingRad = ((getWidth()+getHeight())/2)/6; // Rolling ball diameter == 1/3 of image linear dimension
-			run("Subtract Background...", "rolling=" + rollingRad + " sliding");
-			run("Smooth");
-			run("Auto Threshold", "method=Li");
-			run("Make Binary");
-			if (isNucleus) {
-				run("Watershed");
-			}
-			
-			//return something;
+	selectWindow(inName);
+	run("Duplicate...", "title=Segment"); // Narrow dynamic range
+	run("Enhance Contrast", "saturated=0.35"); // [0,65535]
+	run("Apply LUT");
+	run("8-bit"); // [0,255]
+	rollingRad = ((getWidth()+getHeight())/2)/6; // Rolling ball diameter == 1/3 of image linear dimension
+	run("Subtract Background...", "rolling=" + rollingRad + " sliding");
+	run("Smooth");
+	run("Auto Threshold", "method=Li");
+	run("Make Binary");
+	if (isNucleus)
+		run("Watershed");
+	
+	//return something;
 }
 
 // Cytoskeleton Orientation
@@ -525,40 +518,47 @@ function CytoskeletOrient(output, serial, file, ncells) {
 	
 	selectWindow("Mask of Img_" + i+1 + "a - Segmentation - " + file);
 	run("Duplicate...", "title=MultiplMask");
-	run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
+	if (orientStr == "All Filaments")
+		run("Macro...", "code=v=1"); // Constant 1 (Identity Multiplicative Mask)
+	else //if (orientStr == "Double Scale")
+		run("Divide...", "value=255"); // {0,1} Values (Multiplicative Mask)
+	
 	imageCalculator("Multiply create", "Original", "MultiplMask");
 	
 	// gradient=4 -> Gaussian Gradient
 	run("OrientationJ Distribution", "tensor=1.0 gradient=4 orientation=on coherency=on radian=off binary=on histogram=on table=on min-coherency=1.0 min-energy=1.0");
 	
-	// Close Table
-	if (isOpen("OJ-Distribution-1")) {
-		selectWindow("OJ-Distribution-1");
-		run("Close");
+	// Normalize Orientation Histogram and fill out MasterMatrix_O
+	selectWindow("OJ-Distribution-1");
+	orVal = Table.getColumn("Slice1"); // Array
+	run("Close"); // Close Table
+	
+	selectWindow("MasterMatrix_O");
+	sampleNum = (getHeight()-3)/2;
+	
+	if (orientStr == "All Filaments") {
+		for (row = 0; row < 180; row++) {
+			setPixel(row, sampleNum+3+serial, orVal[row]); // No Normalization
+		}
+	} else { //if (orientStr == "Double Scale") {
+		norm = 0;
+		for (row = 0; row < 180; row++) {
+			norm = norm + orVal[row];
+		}
+		for (row = 0; row < 180; row++) {
+			setPixel(row, sampleNum+3+serial, (orVal[row]/norm)*ncells);
+		}
 	}
 	
-	// Histogram and Normalization factor
+	// Save Histogram
 	selectWindow("OJ-Histogram-1-slice-1");
 	if(full) {
 		saveAs("tiff", output + File.separator + "Cell" + File.separator + "Img_" + serial+1 + "g - CytoHisto - " + file);
 		close();
-	}		
-	selectWindow("OJ-Histogram-1-slice-1");
-	setBatchMode("show");
-	Plot.showValues();
-	while(isOpen("OJ-Histogram-1-slice-1")){ // For closing multiple Histogram windows
+	}
+	while(isOpen("OJ-Histogram-1-slice-1")) { // For closing multiple Histogram windows
 		selectWindow("OJ-Histogram-1-slice-1");
 		run("Close");
-	}
-	
-	norm = 0;
-	for (row = 0; row < nResults; row++) {
-		norm = norm + getResult("Y", row);
-	}
-	selectWindow("MasterMatrix_O");
-	sampleNum = (getHeight()-3)/2;
-	for (row = 0; row < nResults; row++) {
-		setPixel(row, sampleNum+3+serial, (getResult("Y", row)/norm)*ncells);
 	}
 	
 	// Build the Color Survey
@@ -615,11 +615,11 @@ function CellOrient(output, serial, radius, file, ncells) {
 	// gradient=4 -> Gaussian Gradient
 	run("OrientationJ Distribution", "tensor=" + radius + " gradient=4 orientation=on coherency=on radian=off histogram=on table=on min-coherency=0.0 min-energy=0.0 ");
 	
-	// Close Table and histograms
+	// Close table and histograms
 	if (isOpen("OJ-Distribution-1")) {
 		selectWindow("OJ-Distribution-1");
 		run("Close");
-	} 
+	}
 	while(isOpen("OJ-Histogram-1-slice-1")){ // For closing multiple Histogram windows
 		selectWindow("OJ-Histogram-1-slice-1");
 		run("Close");
@@ -641,8 +641,8 @@ function CellOrient(output, serial, radius, file, ncells) {
 	setOption("ScaleConversions", false); // Don't scale when converting to 8-bit
 	
 	selectWindow("OJ-Coherency-1"); // [0,1] -> [0,255]
-		run("Multiply...", "value=255");
-		run("8-bit");
+	run("Multiply...", "value=255");
+	run("8-bit");
 	imageCalculator("Multiply create", "OJ-Coherency-1", "dup-for-bright"); // Mask Coherency to make weights for histogram
 	selectWindow("Result of OJ-Coherency-1");
 	rename("weight");
@@ -651,9 +651,9 @@ function CellOrient(output, serial, radius, file, ncells) {
 	close();
 	
 	selectWindow("OJ-Orientation-1");
-	run("Duplicate...", "title=dup-for-hue2"); // [-90,+90] -> [0,180]
-		run("Add...", "value=90");
-		run("8-bit");
+	run("Duplicate...", "title=dup-for-hue2");
+	run("Add...", "value=90"); // [-90,+90] -> [0,180]
+	run("8-bit");
 	//run("Add Specified Noise...", "standard=1"); // Noise will smooth histogram to avoid quantization spikes
 	
 	setOption("ScaleConversions", true); // Restore default
@@ -667,17 +667,17 @@ function CellOrient(output, serial, radius, file, ncells) {
 	
 	selectWindow("weight");
 	getStatistics(areaW, meanW, minW, maxW);
-	step = floor(maxW/10); // Ten-level weights (10 instead of 256 to speed up the computation)
+	step = floor(maxW/10); // Just 10-level weights (10 instead of 256 to speed up the computation)
 	//print("Max of Coherency = " + maxW); // Debug
 	//print("Ten-level step = " + step); // Debug
 	
 	mainhisto = newArray(180);
 	
 	if(step >= 1) { // ...that is (maxW >= 10)
-		for(h=0; h < 10; h++) {
+		for(h = 0; h < 10; h++) {
 			
 			// Debug
-			/* 
+			/*
 			if(h+1 == 10)
 				print("level", h+1, ":", h*step+1, "-", maxW);
 			else
@@ -708,7 +708,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 			close();
 			
 			histo[0] = 0; // Delete background bin (and zero-Coherency pixels)
-			for(k=0; k<180; k++){
+			for(k = 0; k < 180; k++){
 				mainhisto[k] = mainhisto[k] + histo[k]*((h+1)*step-step/2); // Build weighted histogram
 			}
 		}
@@ -729,7 +729,7 @@ function CellOrient(output, serial, radius, file, ncells) {
 		close();
 		
 		histo[0] = 0; // Delete background bin (and zero-Coherency pixels)
-		for(k=0; k<180; k++){
+		for(k = 0; k < 180; k++){
 			mainhisto[k] = histo[k]*5; // Build weighted histogram (5 is the midpoint in the coherency range [1-9])
 		}
 	}
@@ -802,6 +802,7 @@ function PlotMM2(sampleNum) {
 	setColor("white");
 	setFont("SansSerif", 16, "bold");
 	setJustification("right");
+	setLineWidth(2);
 	drawLine(55, 0, 55, 720); // Vertical Axis
 	for (k = 1; k <= 18; k++) {
 		drawLine(55, k*4*10-1-2, 50, k*4*10-1-2); // Horizontal Ticks
@@ -854,15 +855,16 @@ function systeminfo(morphversion) {
 	
 	// Print Versioning Info
 	print("\nArchitecture:   " + getInfo("os.arch"));
-	print("Operating system:   " + getInfo("os.name") + "   (version " + getInfo("os.version") + ")");
-	print(getInfo("java.runtime.name") + "   (build " + getInfo("java.version") + ")");
-	print("Java Virtual Machine:   " + getInfo("java.vm.name") + "   (build " + getInfo("java.vm.version") + ")");
+	print("Operating system:   " + getInfo("os.name") + " (version " + getInfo("os.version") + ")");
+	print("Java version:   " + getInfo("java.version"));
+	print(getInfo("java.runtime.name"));
+	print("Java Virtual Machine:   " + getInfo("java.vm.name") + " (build " + getInfo("java.vm.version") + ")");
 	print("ImageJ version:   " + getVersion());
 	
 	print("\nMorpheus Version:   " + morphversion);
 	print("    Anti-spot lower bound = " + lowBound + " pixel^2");
 	print("    Tolerance = " + tol + " sigma");
-	if(orient) {print("    Orientation analysis option checked");}
+	if(orient) {print("    Orientation analysis option checked (" + orientStr + " mode)");}
 	if(nucleus) {print("    Nucleus analysis option checked (Nucleus identifier = " + identifier + ")");}
 	if(full) {print("    Full output option checked");}
 	if(verbose) {print("    Verbose log option checked");}
