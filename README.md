@@ -47,10 +47,11 @@ insufficient image quality.
 If everything worked properly, the message *All output files have been correctly
 saved to \<output\>* is printed in Fiji Log window.
 
-For a more detailed guide to MORPHEUS algorithm and output, please refer to:
+For a more detailed guide to MORPHEUS algorithm and output, please refer to the
+following docs:
 
-Ruffinatti FA, Genova T, Mussano F, Munaron L. **MORPHEUS: An automated tool for
-unbiased and reproducible cell morphometry**. *J Cell Physiol.*
+1. Ruffinatti FA, Genova T, Mussano F, Munaron L. **MORPHEUS: An automated tool
+for unbiased and reproducible cell morphometry**. *J Cell Physiol.*
 2020;235:10110–10115. https://doi.org/10.1002/jcp.29768
 
-and **MORPHEUS - User Guide and SM.pdf'**.
+2. **MORPHEUS - User Guide and Supplementary Materials** 
