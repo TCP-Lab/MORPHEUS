@@ -1,3 +1,7 @@
+> **Important**: This repository is *silent*. No active development is currently being
+carried out, but it is still maintained. Please open an issue to request help
+or features.
+
 # MORPHEUS
 ###### Multiparametric Morphometric Analysis of EUcaryotic cellS
 
